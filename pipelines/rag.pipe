@@ -1,0 +1,201 @@
+{
+  "components": [
+    {
+      "id": "parse_1",
+      "provider": "parse",
+      "name": "Parser",
+      "config": {
+        "name": "Parser"
+      },
+      "ui": {
+        "position": {
+          "x": 242,
+          "y": 22.8
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "dropper_1"
+        }
+      ]
+    },
+    {
+      "id": "audio_transcribe_1",
+      "provider": "audio_transcribe",
+      "name": "Transcribe",
+      "config": {
+        "profile": "default",
+        "default": {
+          "max_seconds": 300,
+          "min_seconds": 240,
+          "model": "base",
+          "silence_threshold": 0.25,
+          "vad_level": 1
+        },
+        "name": "Transcribe"
+      },
+      "ui": {
+        "position": {
+          "x": 472,
+          "y": 108
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "audio",
+          "from": "parse_1"
+        },
+        {
+          "lane": "video",
+          "from": "parse_1"
+        }
+      ]
+    },
+    {
+      "id": "ocr_1",
+      "provider": "ocr",
+      "name": "OCR",
+      "config": {
+        "engine": "easyocr",
+        "profile": "latin",
+        "script_family": "latin",
+        "table_engine": "doctr",
+        "name": "OCR"
+      },
+      "ui": {
+        "position": {
+          "x": 472,
+          "y": 12
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "image",
+          "from": "parse_1"
+        }
+      ]
+    },
+    {
+      "id": "preprocessor_langchain_1",
+      "provider": "preprocessor_langchain",
+      "name": "General Text",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter"
+        },
+        "name": "General Text"
+      },
+      "ui": {
+        "position": {
+          "x": 702,
+          "y": 108
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parse_1"
+        },
+        {
+          "lane": "text",
+          "from": "audio_transcribe_1"
+        },
+        {
+          "lane": "text",
+          "from": "ocr_1"
+        }
+      ]
+    },
+    {
+      "id": "embedding_transformer_1",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "name": "Transformer"
+      },
+      "ui": {
+        "position": {
+          "x": 932,
+          "y": 108
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "preprocessor_langchain_1"
+        }
+      ]
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "name": "Qdrant",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": 6333,
+          "score": 0.7,
+          "collection": "ROCKETRIDE_DOCS"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 1162,
+          "y": 108
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_transformer_1"
+        }
+      ]
+    },
+    {
+      "id": "dropper_1",
+      "provider": "dropper",
+      "name": "Dropper",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper",
+        "name": "Dropper"
+      },
+      "ui": {
+        "position": {
+          "x": 12,
+          "y": 22.8
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "ddf9b99f-1dd4-4fd8-86d6-5b2fc769d8e9",
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "version": 1,
+  "docRevision": 17
+}

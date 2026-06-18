@@ -10,11 +10,11 @@ const commands = [
     .setDescription('Lock channel and post how-to embed'),
 ];
 
-const rest = new REST().setToken(process.env.BOT_TOKEN);
+const rest = new REST().setToken(process.env.SHOWCASE_BOT_TOKEN);
 
 (async () => {
   const data = await rest.put(
-    Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+    Routes.applicationGuildCommands(process.env.SHOWCASE_CLIENT_ID, process.env.SHOWCASE_GUILD_ID),
     { body: commands.map(c => c.toJSON()) },
   );
 
