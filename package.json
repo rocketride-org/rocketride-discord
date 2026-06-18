@@ -11,7 +11,8 @@
 	"license": "ISC",
 	"dependencies": {
 		"discord.js": "14.14.1",
-		"dotenv": "^17.3.1"
+		"dotenv": "^17.3.1",
+		"rocketride": "^1.2.0"
 	},
 	"overrides": {
 		"discord.js": {
@@ -22,5 +23,8 @@
 			"@discordjs/formatters": "0.3.3",
 			"@discordjs/collection": "1.5.3"
 		}
+	},
+	"devDependencies": {
+		"tsx": "^4.22.4"
 	}
 }

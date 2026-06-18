@@ -58,4 +58,4 @@ client.once('ready', async () => {
   client.destroy();
 });
 
-client.login(process.env.BOT_TOKEN);
+client.login(process.env.SHOWCASE_BOT_TOKEN);

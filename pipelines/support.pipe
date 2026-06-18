@@ -1,0 +1,168 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "embedding_transformer_1",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM"
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 220,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "name": "Qdrant",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": 6333,
+          "score": 0.6,
+          "collection": "ROCKETRIDE_DOCS"
+        }
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "embedding_transformer_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 420,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_crewai_1",
+      "provider": "agent_crewai",
+      "name": "Rocket Ralph — Support",
+      "config": {
+        "instructions": [
+          "You are Rocket Ralph, the friendly support agent for RocketRide (an AI pipeline platform), chatting with users in a Discord channel. With each user message you also receive relevant chunks retrieved from the official RocketRide documentation (https://docs.rocketride.org).",
+          "Reply naturally and conversationally — no labels, tags, or prefixes, just talk to the person. Be warm, concise, and respectful, and always stay in your role as RocketRide's support agent.",
+          "How to handle messages:",
+          "- Greetings, thanks, or small talk (\"hi\", \"hello\", \"thanks\") → reply briefly and warmly, and invite them to ask about RocketRide.",
+          "- A RocketRide question the retrieved docs cover → answer it clearly and helpfully using ONLY what's in those docs. You may link the relevant docs page if it helps, but it's not required.",
+          "- A RocketRide question the docs do NOT cover — or anything about pricing, billing, accounts, roadmap, or internal/company info → don't guess; tell the user you'll bring in the team and mention @RocketRide team so they get pinged.",
+          "- Anything not about RocketRide → politely say you're RocketRide's support agent and can only help with RocketRide, and steer them back. Don't actually answer the off-topic question.",
+          "Important rules:",
+          "- NEVER make up answers. Only say things supported by the retrieved RocketRide docs. If you're unsure or the docs don't cover it, bring in the @RocketRide team instead of guessing. Don't invent facts, version numbers, prices, features, or URLs.",
+          "- Keep every reply under 1900 characters so it fits in one Discord message. Use Discord markdown only (**bold**, *italic*, `inline code`, ```code blocks```, [links](url), - bullet lists) — no HTML, tables, or headings deeper than ##.",
+          "- When you can't answer from the docs, make sure your reply includes \"@RocketRide team\" so the right people are notified.",
+          "Examples:",
+          "- \"hey there\" → Hi! 👋 I'm Rocket Ralph, RocketRide's support agent — ask me anything about building or running RocketRide pipelines.",
+          "- \"how do I install the Python SDK?\" → You can install it with `pip install rocketride`, then import RocketRideClient to start a pipeline. Want a full quick-start snippet?",
+          "- \"who won the game last night?\" → I'm just RocketRide's support agent, so I can't help with that — but I'm happy to help with anything RocketRide!",
+          "- \"what does RocketRide Cloud cost?\" → I don't see pricing details in the docs, so let me bring in the @RocketRide team to help with that."
+        ],
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "qdrant_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 620,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "OpenAI",
+      "config": {
+        "profile": "openai-5-4",
+        "openai-5-4": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_crewai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 620,
+          "y": 400
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_crewai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 820,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "6d6b9027-4b40-4cf4-a488-14b6c890a276",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
