@@ -1,2 +1,17 @@
-node_modules
+# dependencies
+node_modules/
+
+# secrets & local env
 .env
+.env.local
+
+# runtime state & logs (pids, bot logs, paused-threads.json)
+logs/
+
+# RocketRide SDK docs fetched locally (see refresh-docs.sh)
+.rocketride/
+
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+Thumbs.db
