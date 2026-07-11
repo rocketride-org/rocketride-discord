@@ -109,21 +109,32 @@ function memberRoleIds(i: ChatInputCommandInteraction): string[] {
 	if (roles?.cache) return [...roles.cache.keys()]; // GuildMember → GuildMemberRoleManager
 	return [];
 }
+// The @RocketRide team role: always allowed to use the scheduler; command visibility is also
+// gated to it (via ModerateMembers on the commands below). Override with SCHEDULER_TEAM_ROLE_ID.
+const TEAM_ROLE_ID = process.env.SCHEDULER_TEAM_ROLE_ID || '1331418231113650196';
+
 async function hasSchedulerAccess(i: ChatInputCommandInteraction): Promise<boolean> {
 	if (isGuildManager(i)) return true; // managers always pass (never lock admins out)
-	const allowed = await getAllowedRoles();
-	if (!allowed.length) return false; // default-deny until a manager grants a role
 	const mine = new Set(memberRoleIds(i));
+	if (mine.has(TEAM_ROLE_ID)) return true; // the @RocketRide team always has access
+	const allowed = await getAllowedRoles();
 	return allowed.some((r) => mine.has(r));
 }
 
 // --- command registration ----------------------------------------------------
 const commands = [
-	new SlashCommandBuilder().setName('ping').setDescription('Health check'),
-	new SlashCommandBuilder().setName('help').setDescription('How to use (copy-pasteable)'),
+	new SlashCommandBuilder()
+		.setName('ping')
+		.setDescription('Health check')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+	new SlashCommandBuilder()
+		.setName('scheduler-help')
+		.setDescription('How to use the scheduler (copy-pasteable)')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 	new SlashCommandBuilder()
 		.setName('schedule')
 		.setDescription('Schedule a post')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
 		.addStringOption((o) =>
 			o
 				.setName('message')
@@ -141,16 +152,19 @@ const commands = [
 	new SlashCommandBuilder()
 		.setName('scheduled')
 		.setDescription('List scheduled posts')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
 		.addIntegerOption((o) =>
 			o.setName('limit').setDescription('How many (default 10, max 50)').setMinValue(1).setMaxValue(50),
 		),
 	new SlashCommandBuilder()
 		.setName('cancel')
 		.setDescription('Cancel by id')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
 		.addStringOption((o) => o.setName('id').setDescription('Post id or short prefix').setRequired(true)),
 	new SlashCommandBuilder()
 		.setName('timezone')
 		.setDescription('Show or set timezone')
+		.setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
 		.addStringOption((o) =>
 			o.setName('location').setDescription('Place (London) or IANA name; empty to view'),
 		),
@@ -208,25 +222,52 @@ const HELP_TEXT = [
 	'**`/timezone [location]`** — no arg shows the current tz; pass a place (e.g. `London`) or IANA name to change it (with a confirm step).',
 	'**`/ping`** — health check.',
 	'',
-	'**🔐 Access — who can use the scheduler** _(server managers only)_',
-	'The scheduler works in **any channel**, but only for allowed roles — everyone else gets a private “no access” notice. By default only members with **Manage Server** can use it. Grant or revoke roles with:',
-	'• `/access allow role:@Role` — let a role use the scheduler',
+	'**🔐 Access — who can use the scheduler**',
+	'The scheduler is limited to the **@RocketRide team** role — its commands are hidden from everyone else. Server managers can grant additional roles with:',
+	'• `/access allow role:@Role` — let another role use the scheduler',
 	'• `/access deny role:@Role` — remove a role',
 	'• `/access show` — list the roles that currently have access',
 	'',
 	'_Tips:_ the preview is the real post (links/image render), but previews never ping — only the delivered post does. Times are stored as an absolute instant, so changing the timezone later never shifts an already-scheduled post.',
-	'',
-	'Paste this into an AI assistant to have it write the command for you:',
+].join('\n');
+
+// The copy-pasteable AI-assistant prompt for /scheduler-help. Sent as a SEPARATE message so
+// each stays under Discord's 2000-char limit and this block copies cleanly on its own.
+const ASSISTANT_PROMPT = [
+	'🤖 **Paste this into an AI assistant to have it write your `/schedule` command:**',
 	'```text',
-	'Write a Discord /schedule command for me. Ask me for: the message text, the',
-	'date and time, and (optionally) a target channel and image. Then output it as:',
+	'Write a Discord /schedule command for me.',
+	'',
+	'Ask me for:',
+	'- the message text',
+	"- the date and time (if I only give a time, ask me for the date; don't assume today)",
+	'- optionally: a target channel and an image',
+	'',
+	'Then output it as:',
 	'/schedule message:<text with \\n for line breaks> time:<YYYY-MM-DD HH:MM>',
-	'Keep links and @mentions inline in the message text.',
+	'',
+	'Formatting rules:',
+	'- Keep all links and @mentions INLINE inside the message text. Never leave a bare/floating URL on its own line.',
+	'- Every URL must live inside descriptive words, not shown as a raw link, UNLESS I say otherwise.',
+	"- Handle each link's embed behavior using these exact Discord formats:",
+	'  - Clickable words, NO embed:  [anchor text](<url>)   ← angle brackets INSIDE the parentheses',
+	'  - Clickable words, ALLOW embed:  post the bare url on its own (masked links suppress previews, so a link I want to embed must be a plain URL)',
+	'  - Raw URL shown, NO embed:  <url>',
+	'- For each link I give you, ask (or follow my instruction) whether it should EMBED or NOT, and which words it should be anchored to.',
+	"- If a link needs to both embed AND be inline as words, warn me that Discord can't do both — an embedding link must be a bare URL, so I have to choose.",
+	'',
+	'Content rules:',
+	'- Do NOT change my punctuation. Keep my commas, periods, and spacing exactly as I wrote them. Never swap anything for em dashes.',
+	'- Do NOT correct or alter spelling of names, brands, or @mentions unless I ask.',
+	'- Preserve emojis and line breaks exactly.',
+	'',
+	'Show me two things: a readable preview of the final message, then the copy-paste /schedule command.',
 	'```',
 ].join('\n');
 
 async function onHelp(i: ChatInputCommandInteraction): Promise<void> {
 	await i.reply({ content: HELP_TEXT, ephemeral: true });
+	await i.followUp({ content: ASSISTANT_PROMPT, ephemeral: true });
 }
 
 // --- /schedule → preview → Confirm ------------------------------------------
@@ -612,8 +653,8 @@ async function dispatch(id: string): Promise<void> {
 client.on(Events.InteractionCreate, async (i: Interaction) => {
 	try {
 		if (i.isChatInputCommand()) {
-			// Access gate: operational commands require an allow-listed role (managers always
-			// pass). /ping and /help stay open; /access is admin-gated by its own permissions.
+			// Access gate: operational commands require the RocketRide team role (managers always
+			// pass). /ping and /scheduler-help stay open; /access is admin-gated by its own permissions.
 			if (['schedule', 'scheduled', 'cancel', 'timezone'].includes(i.commandName)) {
 				if (!(await hasSchedulerAccess(i))) {
 					await i.reply({
@@ -627,7 +668,7 @@ client.on(Events.InteractionCreate, async (i: Interaction) => {
 			switch (i.commandName) {
 				case 'ping':
 					return await onPing(i);
-				case 'help':
+				case 'scheduler-help':
 					return await onHelp(i);
 				case 'schedule':
 					return await onSchedule(i);
