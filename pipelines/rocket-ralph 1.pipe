@@ -1,5 +1,5 @@
 {
-  "project_id": "e23e8fbd-5760-4be8-a52a-a25ff2b38585",
+  "project_id": "8b93feeb-b3ff-48ba-ac6b-fd40d615020d",
   "components": [
     {
       "id": "webhook_1",
@@ -121,14 +121,12 @@
       "provider": "qdrant",
       "name": "Qdrant",
       "config": {
-        "profile": "cloud",
-        "cloud": {
-          "collection": "demo-rocket-ralph",
+        "profile": "local",
+        "local": {
+          "host": "localhost",
           "port": 6333,
-          "score": 0.7,
-          "serverName": "qdrant",
-          "apikey": "${ROCKETRIDE_QDRANT_KEY_JOSH}",
-          "host": "${ROCKETRIDE_QDRANT_HOST_JOSH}"
+          "score": 0.6,
+          "collection": "ROCKETRIDE_DOCS"
         },
         "name": "Qdrant",
         "parameters": {
@@ -255,18 +253,16 @@
       ]
     },
     {
-      "id": "llm_anthropic_1",
-      "provider": "llm_anthropic",
-      "name": "Anthropic",
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "OpenAI",
       "config": {
-        "profile": "claude-sonnet-4-6",
-        "claude-sonnet-4-6": {
-          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        "profile": "gpt-4-1",
+        "gpt-4-1": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
         },
-        "name": "Anthropic",
-        "parameters": {
-          "google": {}
-        }
+        "name": "OpenAI",
+        "parameters": {}
       },
       "ui": {
         "position": {
