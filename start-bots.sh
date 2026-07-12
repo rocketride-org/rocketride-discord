@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Start the Discord bots detached (survive logout via nohup).
-#   showcase   -> index.js      (showcase moderator)
-#   support    -> bot.ts        (Rocket Ralph, run via tsx)
+#   showcase   -> showcase.js   (showcase moderator)
+#   support    -> support.ts    (Rocket Ralph, run via tsx)
 #   scheduler  -> scheduler.ts  (Post Scheduler, run via tsx; needs Redis)
+#   social     -> social.ts     (Social announcer: in-process schedule, run via tsx)
 # Logs go to logs/*.log, PIDs to logs/*.pid. Safe to re-run: skips a bot
 # that is already running.
 set -euo pipefail
@@ -45,6 +46,7 @@ else
   echo "WARNING: docker not found — ensure Redis is reachable for the scheduler."
 fi
 
-start showcase   node index.js
-start support    ./node_modules/.bin/tsx bot.ts
+start showcase   node showcase.js
+start support    ./node_modules/.bin/tsx support.ts
 start scheduler  ./node_modules/.bin/tsx scheduler.ts
+start social     ./node_modules/.bin/tsx social.ts

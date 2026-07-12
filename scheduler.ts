@@ -26,7 +26,7 @@ import { DateTime } from 'luxon';
 // fires channel.send(...) directly. Redis is the durable store (posts + the timer queue +
 // the persisted timezone), so a restart just re-arms from what's already in Redis.
 //
-// Kept SEPARATE from bot.ts on purpose so it can be tested before being released/merged.
+// Kept SEPARATE from support.ts on purpose so it can be tested before being released/merged.
 // It uses its own SCHEDULER_* env vars and its own Discord application/bot token.
 
 // --- config ------------------------------------------------------------------

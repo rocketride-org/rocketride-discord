@@ -2,9 +2,9 @@
 	"name": "showcase-moderator",
 	"version": "1.0.0",
 	"description": "",
-	"main": "index.js",
+	"main": "showcase.js",
 	"scripts": {
-		"start": "node index.js",
+		"start": "node showcase.js",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"author": "",

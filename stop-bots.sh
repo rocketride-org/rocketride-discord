@@ -2,11 +2,11 @@
 # Stop both bots started by start-bots.sh.
 cd "$(dirname "$0")"
 
-# pattern[name] = command pattern to sweep for stray children (tsx runs bot.ts
+# pattern[name] = command pattern to sweep for stray children (tsx runs support.ts
 # in a child process that can outlive the pid we recorded).
-declare -A pattern=( [showcase]="node index.js" [support]="bot.ts" [scheduler]="scheduler.ts" )
+declare -A pattern=( [showcase]="node showcase.js" [support]="support.ts" [scheduler]="scheduler.ts" [social]="social.ts" )
 
-for name in showcase support scheduler; do
+for name in showcase support scheduler social; do
   pidfile="logs/$name.pid"
   if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     pid=$(cat "$pidfile")

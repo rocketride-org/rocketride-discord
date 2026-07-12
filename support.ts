@@ -17,6 +17,10 @@ const PIPELINE = process.env.PIPE || 'pipelines/rocket-ralph 1.pipe';
 // named explicitly. The bot talks via RR.chat(), so use the chat node.
 const PIPELINE_SOURCE = process.env.PIPE_SOURCE || 'chat_1';
 const CHANNEL_ID = process.env.SUPPORT_CHANNEL_ID;
+// A second, "guest" channel: the bot only engages here when it is @-mentioned (on a top-level
+// message), then behaves exactly like the primary channel — opens a thread, carries context,
+// escalates. Override with SUPPORT_MENTION_CHANNEL_ID.
+const MENTION_CHANNEL_ID = process.env.SUPPORT_MENTION_CHANNEL_ID || '1480957995964956702';
 const ESCALATION_ROLE_ID = process.env.SUPPORT_ESCALATION_ROLE_ID || '1331418231113650196'; // @RocketRide team
 const ROLE_MENTION = `<@&${ESCALATION_ROLE_ID}>`;
 
@@ -289,7 +293,7 @@ async function main() {
 	const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 	discord.once(Events.ClientReady, (c) => {
-		log(`bot online as ${c.user.tag} — listening in channel ${CHANNEL_ID} (replies in threads)`);
+		log(`bot online as ${c.user.tag} — primary channel ${CHANNEL_ID}, mention-only channel ${MENTION_CHANNEL_ID} (replies in threads)`);
 		log('waiting for messages... (Ctrl+C to stop)');
 	});
 
@@ -299,8 +303,12 @@ async function main() {
 		if (!text) return;
 
 		// Case 1: top-level message in the support channel → open a thread and answer there.
-		if (msg.channelId === CHANNEL_ID) {
-			if (await isAimedAtSomeoneElse(msg, msg.client.user!.id)) {
+		const botId = msg.client.user!.id;
+		const inPrimary = msg.channelId === CHANNEL_ID;
+		const inMention = msg.channelId === MENTION_CHANNEL_ID;
+		if (inPrimary || inMention) {
+			if (inMention && !msg.mentions.users.has(botId)) return; // guest channel: ignore unless @-mentioned
+			if (await isAimedAtSomeoneElse(msg, botId)) {
 				log(`ack-only (aimed at someone else): ${msg.author.username}`);
 				await acknowledge(msg);
 				return;
@@ -319,9 +327,12 @@ async function main() {
 		}
 
 		// Case 2: a message inside a thread under the support channel → continue the conversation.
-		if (msg.channel.isThread() && (msg.channel as ThreadChannel).parentId === CHANNEL_ID) {
+		if (
+			msg.channel.isThread() &&
+			((msg.channel as ThreadChannel).parentId === CHANNEL_ID ||
+				(msg.channel as ThreadChannel).parentId === MENTION_CHANNEL_ID)
+		) {
 			const thread = msg.channel as ThreadChannel;
-			const botId = msg.client.user!.id;
 			const mentioned = msg.mentions.users.has(botId);
 			// Fast path = the persisted set. The first time we see a thread this process (e.g.
 			// after a restart), reconcile with Discord history so an escalation pause is restored
