@@ -27,7 +27,7 @@ const sStr = (v: string | undefined) => { const t = v?.trim(); return t ? t : un
 const SOCIAL = {
 	limit: sNum(process.env.SOCIAL_FETCH_LIMIT, 5),
 	tz: sStr(process.env.SOCIAL_TZ) ?? sStr(process.env.TIMEZONE) ?? 'America/Los_Angeles',
-	hours: (process.env.SOCIAL_CRON_HOURS || '9,10,11,16,17,18')
+	hours: (process.env.SOCIAL_CRON_HOURS || '10,11,12,16,17,18')
 		.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 23).sort((a, b) => a - b),
 	channelId: sStr(process.env.SOCIAL_DISCORD_CHANNEL_ID),
 	botToken: sStr(process.env.SOCIAL_DISCORD_TOKEN) ?? sStr(process.env.SCHEDULER_BOT_TOKEN) ?? sStr(process.env.DISCORD_BOT_TOKEN),
@@ -38,6 +38,11 @@ const SOCIAL = {
 		excludeReplies: sBool(process.env.X_EXCLUDE_REPLIES, true), excludeRetweets: sBool(process.env.X_EXCLUDE_RETWEETS, true),
 	},
 	newsletter: { apiUrl: sStr(process.env.GHOST_API_URL), contentApiKey: sStr(process.env.GHOST_CONTENT_API_KEY) },
+	instagram: {
+		accountId: sStr(process.env.INSTAGRAM_ACCOUNT_ID),
+		token: sStr(process.env.INSTAGRAM_ACCESS_TOKEN),
+		apiVersion: sStr(process.env.INSTAGRAM_API_VERSION) || 'v22.0',
+	},
 };
 
 type FeedItem = { platform: string; id: string; title: string; text?: string; url: string; published: Date; author?: string; thumbnail?: string };
@@ -134,10 +139,39 @@ async function fetchNewsletter(limit: number): Promise<FeedItem[]> {
 	}));
 }
 
+async function fetchInstagram(limit: number): Promise<FeedItem[]> {
+	const { accountId, token, apiVersion } = SOCIAL.instagram;
+	const fields = 'id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,username';
+	const max = Math.min(50, Math.max(1, limit));
+	const url = `https://graph.facebook.com/${apiVersion}/${accountId}/media?fields=${fields}&limit=${max}&access_token=${token}`;
+	let resp: any;
+	try {
+		resp = await getJson(url);
+	} catch (e) {
+		// Graph API returns 400 for a bad account id or expired/invalid token.
+		if (e instanceof HttpError && e.status === 400) throw new Error('Instagram 400 — check INSTAGRAM_ACCOUNT_ID / access token (expired?)');
+		throw e;
+	}
+	return (resp.data ?? []).map((m: any): FeedItem => {
+		const caption = typeof m.caption === 'string' ? m.caption : '';
+		return {
+			platform: 'instagram', id: m.id,
+			title: (caption.split('\n')[0] || 'New Instagram post').slice(0, 120),
+			text: caption || undefined,
+			url: m.permalink || 'https://www.instagram.com/',
+			published: new Date(m.timestamp),
+			author: m.username ? `@${m.username}` : undefined,
+			// VIDEO/REEL → thumbnail_url (media_url is the mp4); IMAGE/CAROUSEL → media_url.
+			thumbnail: m.thumbnail_url || m.media_url,
+		};
+	});
+}
+
 const SOCIAL_SOURCES: Array<{ platform: string; requires: string; configured: () => boolean; fetch: (n: number) => Promise<FeedItem[]> }> = [
 	{ platform: 'youtube', requires: 'YOUTUBE_API_KEY + YOUTUBE_CHANNEL_ID', configured: () => Boolean(SOCIAL.youtube.apiKey && (SOCIAL.youtube.channelId || SOCIAL.youtube.handle)), fetch: fetchYouTube },
 	{ platform: 'x', requires: 'X_BEARER_TOKEN + X_USER_ID', configured: () => Boolean(SOCIAL.x.bearerToken && (SOCIAL.x.userId || SOCIAL.x.username)), fetch: fetchX },
 	{ platform: 'newsletter', requires: 'GHOST_API_URL + GHOST_CONTENT_API_KEY', configured: () => Boolean(SOCIAL.newsletter.apiUrl && SOCIAL.newsletter.contentApiKey), fetch: fetchNewsletter },
+	{ platform: 'instagram', requires: 'INSTAGRAM_ACCOUNT_ID + INSTAGRAM_ACCESS_TOKEN', configured: () => Boolean(SOCIAL.instagram.accountId && SOCIAL.instagram.token), fetch: fetchInstagram },
 ];
 
 // --- watermark + seen store (only the LATEST posts, never old ones) ---
@@ -152,31 +186,36 @@ function saveSocialState(s: SocialState): void {
 }
 
 // --- embed + post ---
-const SOCIAL_COLORS: Record<string, number> = { youtube: 0xff0000, x: 0x1d9bf0, newsletter: 0x15171a };
-const SOCIAL_HEADERS: Record<string, string> = { youtube: 'New YouTube video', x: '𝕏  New post on X', newsletter: '✉  New newsletter' };
-// Author-icon must be a raster URL (Discord's embed proxy won't render SVG).
-const SOCIAL_ICONS: Record<string, string> = { youtube: 'https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png' };
+const SOCIAL_COLORS: Record<string, number> = { youtube: 0xff0000, x: 0x1d9bf0, newsletter: 0x15171a, instagram: 0xe4405f };
+// Small brand icon shown next to the title. Must be a raster URL (Discord can't render SVG).
+const SOCIAL_ICONS: Record<string, string> = {
+	youtube: 'https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png',
+	instagram: 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png',
+};
+const SOCIAL_LABELS: Record<string, string> = { youtube: 'New RocketRide video on YouTube', x: '𝕏  New RocketRide post on X', newsletter: '✉  New RocketRide newsletter', instagram: 'New RocketRide post on Instagram' };
 const socialKey = (it: FeedItem) => `${it.platform}:${it.id}`;
 
 function socialEmbed(it: FeedItem) {
+	// Minimal card: brand icon + linked title + the fetched image. For video/reels the
+	// API gives a preview image (thumbnail_url) — Discord can't inline-play the video.
 	const e = new EmbedBuilder()
 		.setColor(SOCIAL_COLORS[it.platform] ?? 0x5865f2)
-		.setAuthor({ name: SOCIAL_HEADERS[it.platform] ?? it.platform, iconURL: SOCIAL_ICONS[it.platform] })
-		.setTitle(it.title.slice(0, 256)).setURL(it.url).setTimestamp(it.published);
-	if (it.text && it.text !== it.title) e.setDescription(it.text.slice(0, 500));
-	if (it.author) e.setFooter({ text: it.author });
+		.setAuthor({ name: SOCIAL_LABELS[it.platform] ?? it.platform, iconURL: SOCIAL_ICONS[it.platform] })
+		.setTitle(it.title.slice(0, 256))
+		.setURL(it.url);
 	if (it.thumbnail) e.setImage(it.thumbnail);
 	return e.toJSON();
 }
 
 // One pass: fetch every configured source, then post only items newer than each
 // platform's watermark (seeding the baseline the first time, so old posts never dump).
-async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean } = {}): Promise<void> {
+async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean; only?: string } = {}): Promise<void> {
 	if (!SOCIAL.channelId) { log('[social] no SOCIAL_DISCORD_CHANNEL_ID — skipping'); return; }
 	if (!SOCIAL.botToken && !opts.dryRun) { log('[social] no bot token (SCHEDULER_BOT_TOKEN / SOCIAL_DISCORD_TOKEN) — skipping'); return; }
 
 	const items: FeedItem[] = [];
 	for (const src of SOCIAL_SOURCES) {
+		if (opts.only && src.platform !== opts.only) continue; // --only <platform> restricts the pass
 		if (!src.configured()) { log(`[social] ${src.platform} not configured (needs ${src.requires}) — skipped`); continue; }
 		try { items.push(...(await src.fetch(SOCIAL.limit))); }
 		catch (e) { log(`[social] ${src.platform} fetch failed:`, e instanceof Error ? e.message : e); }
@@ -259,8 +298,11 @@ function startSocialAnnouncer(): void {
 
 // --- entry (its own process) -------------------------------------------------
 if (process.argv.includes('--social-once')) {
-	// One pass, then exit — manual trigger / testing.
-	announceOnce({ dryRun: process.argv.includes('--dry'), backfill: process.argv.includes('--backfill') })
+	// One pass, then exit — manual trigger / testing. `--only <platform>` restricts it.
+	const argv = process.argv;
+	const only = argv.find((a) => a.startsWith('--only='))?.split('=')[1]
+		?? (argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : undefined);
+	announceOnce({ dryRun: argv.includes('--dry'), backfill: argv.includes('--backfill'), only })
 		.then(() => process.exit(0))
 		.catch((err) => { console.error(err); process.exit(1); });
 } else {
