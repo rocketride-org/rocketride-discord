@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# Stop both bots started by start-bots.sh.
+# Stop Discord bots started by start-bots.sh — by PID file only (no broad pkill sweep,
+# which can catch sibling bots). Killing the recorded pid stops the bot cleanly.
+#
+# Usage:
+#   ./stop-bots.sh                 # stop ALL bots
+#   ./stop-bots.sh support         # stop just one
+#   ./stop-bots.sh support social  # stop several
 cd "$(dirname "$0")"
 
-# pattern[name] = command pattern to sweep for stray children (tsx runs support.ts
-# in a child process that can outlive the pid we recorded).
-declare -A pattern=( [showcase]="node showcase.js" [support]="support.ts" [scheduler]="scheduler.ts" [social]="social.ts" )
+ALL="showcase support support-test scheduler social"
 
-for name in showcase support scheduler social; do
-  pidfile="logs/$name.pid"
+stop_one() {
+  local name="$1" pidfile="logs/$1.pid"
   if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-    pid=$(cat "$pidfile")
+    local pid; pid=$(cat "$pidfile")
     kill "$pid" && echo "stopped $name (pid $pid)"
   else
-    echo "$name: no live pidfile"
+    echo "$name: not running"
   fi
   rm -f "$pidfile"
-  # sweep any stray/child processes matching this bot
-  if pkill -f "${pattern[$name]}" 2>/dev/null; then
-    echo "  swept stray $name process(es) matching '${pattern[$name]}'"
-  fi
-done
+}
+
+for name in ${*:-$ALL}; do stop_one "$name"; done

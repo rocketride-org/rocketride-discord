@@ -4,8 +4,9 @@ import { DateTime } from 'luxon';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // SOCIAL FEED ANNOUNCER — standalone bot (its own process, like scheduler.ts).
-// Fetches RocketRide's latest YouTube videos, X posts, and newsletter issues and
-// announces NEW ones to a Discord channel on a schedule. Posts via REST as the
+// Fetches RocketRide's latest YouTube videos, X posts, newsletter issues,
+// Instagram posts, and LinkedIn posts and announces NEW ones to a Discord channel
+// on a schedule. Posts via REST as the
 // scheduler bot (SOCIAL/SCHEDULER token) — no gateway login of its own.
 // "Only latest, not old": a per-platform watermark (logs/social-seen.json) records
 // the newest item seen at first run and never backfills older ones. X replies
@@ -42,6 +43,17 @@ const SOCIAL = {
 		accountId: sStr(process.env.INSTAGRAM_ACCOUNT_ID),
 		token: sStr(process.env.INSTAGRAM_ACCESS_TOKEN),
 		apiVersion: sStr(process.env.INSTAGRAM_API_VERSION) || 'v22.0',
+	},
+	linkedin: {
+		// A refresh token (in either var) is exchanged for a short-lived access token
+		// each run via client id+secret — access tokens expire ~60d, so a daemon must refresh.
+		token: sStr(process.env.LINKEDIN_ACCESS_TOKEN),
+		refreshToken: sStr(process.env.LINKEDIN_REFRESH_TOKEN),
+		clientId: sStr(process.env.LINKEDIN_CLIENT_ID),
+		clientSecret: sStr(process.env.LINKEDIN_CLIENT_SECRET),
+		orgId: sStr(process.env.LINKEDIN_ORG_ID),
+		authorUrn: sStr(process.env.LINKEDIN_AUTHOR_URN),
+		apiVersion: sStr(process.env.LINKEDIN_API_VERSION) || '202508',
 	},
 };
 
@@ -167,11 +179,105 @@ async function fetchInstagram(limit: number): Promise<FeedItem[]> {
 	});
 }
 
+// LinkedIn: a refresh token can't be used as a Bearer token — exchange it for a
+// short-lived access token (client id+secret) fresh on each run. LI_ACCESS holds
+// the current pass's token for the posts call + image URN resolutions below.
+let LI_ACCESS: string | undefined;
+async function linkedinAccessToken(): Promise<string> {
+	const li = SOCIAL.linkedin;
+	const refresh = li.refreshToken ?? li.token; // the refresh token may sit in either var
+	if (refresh && li.clientId && li.clientSecret) {
+		const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: li.clientId, client_secret: li.clientSecret });
+		const res = await fetch('https://www.linkedin.com/oauth/v2/accessToken', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(12_000) });
+		const data: any = await res.json().catch(() => ({}));
+		if (!res.ok || !data.access_token) throw new Error(`LinkedIn token exchange failed (HTTP ${res.status})${data?.error ? ` — ${data.error}` : ''}`);
+		return data.access_token as string;
+	}
+	if (li.token) return li.token; // assume it's already an access token
+	throw new Error('LinkedIn: need LINKEDIN_ACCESS_TOKEN, or LINKEDIN_REFRESH_TOKEN + LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET');
+}
+function linkedinHeaders(): Record<string, string> {
+	return { authorization: `Bearer ${LI_ACCESS}`, 'linkedin-version': SOCIAL.linkedin.apiVersion, 'x-restli-protocol-version': '2.0.0' };
+}
+// LinkedIn returns media as URNs; resolve to a real https URL (best-effort — skip on failure).
+// Images resolve via /rest/images (downloadUrl); videos/reels via /rest/videos (its cover thumbnail).
+async function linkedinMediaUrl(ref: unknown): Promise<string | undefined> {
+	if (typeof ref !== 'string' || !ref) return undefined;
+	if (/^https?:\/\//.test(ref)) return ref; // already a URL
+	try {
+		if (/^urn:li:(image|digitalmediaAsset)/.test(ref)) {
+			const d = await getJson<any>(`https://api.linkedin.com/rest/images/${encodeURIComponent(ref)}`, { headers: linkedinHeaders() });
+			return typeof d?.downloadUrl === 'string' ? d.downloadUrl : undefined;
+		}
+		if (/^urn:li:video:/.test(ref)) {
+			const d = await getJson<any>(`https://api.linkedin.com/rest/videos/${encodeURIComponent(ref)}`, { headers: linkedinHeaders() });
+			return typeof d?.thumbnail === 'string' ? d.thumbnail : undefined; // video/reel cover image
+		}
+	} catch { /* fall through → undefined */ }
+	return undefined;
+}
+async function linkedinThumb(content: any): Promise<string | undefined> {
+	if (!content || typeof content !== 'object') return undefined;
+	for (const c of [content.article?.thumbnail, content.media?.id, content.media?.thumbnail, content.multiImage?.images?.[0]?.id]) {
+		const u = await linkedinMediaUrl(c); if (u) return u;
+	}
+	return undefined;
+}
+async function fetchLinkedIn(limit: number): Promise<FeedItem[]> {
+	LI_ACCESS = await linkedinAccessToken();
+	const li = SOCIAL.linkedin;
+	const author = li.authorUrn || (li.orgId ? `urn:li:organization:${li.orgId}` : undefined);
+	if (!author) throw new Error('LinkedIn: set LINKEDIN_ORG_ID or LINKEDIN_AUTHOR_URN');
+	const want = Math.min(50, Math.max(1, limit));
+	// Over-fetch: reshares (reposts) are dropped below, so pull extra to still surface `want` originals.
+	const count = Math.min(50, Math.max(want * 3, 15));
+	const url = `https://api.linkedin.com/rest/posts?q=author&author=${encodeURIComponent(author)}&count=${count}&sortBy=LAST_MODIFIED`;
+	let resp: any;
+	try {
+		resp = await getJson<any>(url, { headers: linkedinHeaders() });
+	} catch (e) {
+		if (e instanceof HttpError) {
+			if (e.status === 401) throw new Error('LinkedIn 401 — token invalid/expired');
+			if (e.status === 403) throw new Error('LinkedIn 403 — token lacks r_organization_social or no admin on this org');
+			if (e.status === 426 || e.status === 400) throw new Error(`LinkedIn ${e.status} — bump LINKEDIN_API_VERSION (currently ${li.apiVersion})`);
+		}
+		throw e;
+	}
+	const elements: any[] = Array.isArray(resp?.elements) ? resp.elements : [];
+	const items: FeedItem[] = [];
+	for (const el of elements) {
+		// ORIGINAL posts only. A reshare/repost carries `reshareContext` (the parent/root of the
+		// post it shares) and no own `content`; original posts have neither. Skip reshares so the
+		// announcer only posts RocketRide's own content, never things it merely reposted.
+		if (el.reshareContext) continue;
+		const commentary = typeof el.commentary === 'string' ? el.commentary : '';
+		const urn: string = el.id || '';
+		const when = el.createdAt ?? el.publishedAt ?? el.firstPublishedAt ?? el.lastModifiedAt;
+		items.push({
+			platform: 'linkedin', id: urn,
+			title: (commentary.split('\n').find((l: string) => l.trim()) || el.content?.article?.title || 'New LinkedIn post').slice(0, 120),
+			text: commentary || undefined, // Version 2 (title + image only) ignores this, but keep it for the record
+			url: urn ? `https://www.linkedin.com/feed/update/${urn}/` : 'https://www.linkedin.com/company/',
+			published: when ? new Date(Number(when)) : new Date(),
+			thumbnail: await linkedinThumb(el.content),
+		});
+		if (items.length >= want) break;
+	}
+	return items;
+}
+
 const SOCIAL_SOURCES: Array<{ platform: string; requires: string; configured: () => boolean; fetch: (n: number) => Promise<FeedItem[]> }> = [
 	{ platform: 'youtube', requires: 'YOUTUBE_API_KEY + YOUTUBE_CHANNEL_ID', configured: () => Boolean(SOCIAL.youtube.apiKey && (SOCIAL.youtube.channelId || SOCIAL.youtube.handle)), fetch: fetchYouTube },
 	{ platform: 'x', requires: 'X_BEARER_TOKEN + X_USER_ID', configured: () => Boolean(SOCIAL.x.bearerToken && (SOCIAL.x.userId || SOCIAL.x.username)), fetch: fetchX },
 	{ platform: 'newsletter', requires: 'GHOST_API_URL + GHOST_CONTENT_API_KEY', configured: () => Boolean(SOCIAL.newsletter.apiUrl && SOCIAL.newsletter.contentApiKey), fetch: fetchNewsletter },
 	{ platform: 'instagram', requires: 'INSTAGRAM_ACCOUNT_ID + INSTAGRAM_ACCESS_TOKEN', configured: () => Boolean(SOCIAL.instagram.accountId && SOCIAL.instagram.token), fetch: fetchInstagram },
+	// LinkedIn posts ORIGINAL/main posts only — reshares (reposts) are filtered in fetchLinkedIn.
+	{
+		platform: 'linkedin',
+		requires: 'LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET + LINKEDIN_REFRESH_TOKEN + LINKEDIN_ORG_ID',
+		configured: () => Boolean((SOCIAL.linkedin.refreshToken || SOCIAL.linkedin.token) && SOCIAL.linkedin.clientId && SOCIAL.linkedin.clientSecret && (SOCIAL.linkedin.orgId || SOCIAL.linkedin.authorUrn)),
+		fetch: fetchLinkedIn,
+	},
 ];
 
 // --- watermark + seen store (only the LATEST posts, never old ones) ---
@@ -186,13 +292,14 @@ function saveSocialState(s: SocialState): void {
 }
 
 // --- embed + post ---
-const SOCIAL_COLORS: Record<string, number> = { youtube: 0xff0000, x: 0x1d9bf0, newsletter: 0x15171a, instagram: 0xe4405f };
+const SOCIAL_COLORS: Record<string, number> = { youtube: 0xff0000, x: 0x1d9bf0, newsletter: 0x15171a, instagram: 0xe4405f, linkedin: 0x0a66c2 };
 // Small brand icon shown next to the title. Must be a raster URL (Discord can't render SVG).
 const SOCIAL_ICONS: Record<string, string> = {
 	youtube: 'https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png',
 	instagram: 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png',
+	linkedin: 'https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png',
 };
-const SOCIAL_LABELS: Record<string, string> = { youtube: 'New RocketRide video on YouTube', x: '𝕏  New RocketRide post on X', newsletter: '✉  New RocketRide newsletter', instagram: 'New RocketRide post on Instagram' };
+const SOCIAL_LABELS: Record<string, string> = { youtube: 'New RocketRide video on YouTube', x: '𝕏  New RocketRide post on X', newsletter: '✉  New RocketRide newsletter', instagram: 'New RocketRide post on Instagram', linkedin: 'New RocketRide post on LinkedIn' };
 const socialKey = (it: FeedItem) => `${it.platform}:${it.id}`;
 
 function socialEmbed(it: FeedItem) {
@@ -203,6 +310,9 @@ function socialEmbed(it: FeedItem) {
 		.setAuthor({ name: SOCIAL_LABELS[it.platform] ?? it.platform, iconURL: SOCIAL_ICONS[it.platform] })
 		.setTitle(it.title.slice(0, 256))
 		.setURL(it.url);
+	// X (post body) and newsletter (excerpt) show a description; YouTube, Instagram, and
+	// LinkedIn stay title + image only.
+	if ((it.platform === 'x' || it.platform === 'newsletter') && it.text) e.setDescription(it.text.slice(0, 4096));
 	if (it.thumbnail) e.setImage(it.thumbnail);
 	return e.toJSON();
 }
