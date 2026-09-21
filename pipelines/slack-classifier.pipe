@@ -1,0 +1,115 @@
+{
+  "components": [
+    {
+      "id": "webhook_1",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "prompt_1",
+      "provider": "prompt",
+      "name": "Triage Instructions",
+      "config": {
+        "instructions": [
+          "You triage RocketRide Discord support messages that the support bot could not resolve, so the right owner can be paged in Slack.",
+          "You receive ONE JSON object with these fields: `question` (the user's message; it may end with an \"[attachments: …]\" note), `ralph_reply` (the support bot's reply, for context on why it escalated), and `areas` (the FIXED list of area tags you may choose from — an array of {\"name\", \"hint\"}).",
+          "Do TWO things:",
+          "1. Write a one-sentence, neutral, third-person summary of the user's problem.",
+          "2. Pick the 1–2 area tags from `areas` that GENUINELY fit — include an area ONLY if it clearly fits, most specific first, at most two.",
+          "If NOTHING in `areas` genuinely fits — e.g. events/hackathons, business/partnership/press/investor topics, a lone greeting, or text with no usable signal (a screenshot with no words, a bare email address) — return {\"areas\": [\"Triage\"]}. Never force an unrelated area.",
+          "Classify from the `question` TEXT; attachments are only supplementary — do NOT pick Triage just because something is attached.",
+          "Choose area names EXACTLY as spelled in `areas` (case-sensitive). Do not invent tags that are not in the list.",
+          "Output STRICT JSON with exactly these fields: {\"summary\": string, \"areas\": string[]}. Output only the JSON object — no markdown fences, no commentary."
+        ],
+        "parameters": {},
+        "name": "Triage Instructions"
+      },
+      "ui": {
+        "position": {
+          "x": 940,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "webhook_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "Triage LLM (nano)",
+      "config": {
+        "profile": "openai-5-4-nano",
+        "openai-5-4-nano": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {},
+        "name": "Triage LLM (nano)"
+      },
+      "ui": {
+        "position": {
+          "x": 1190,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "prompt_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Triage",
+      "config": {
+        "laneName": "answers",
+        "name": "Return Triage"
+      },
+      "ui": {
+        "position": {
+          "x": 1440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_openai_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "9af703ec-542d-478e-a7db-1b8943615e31",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
