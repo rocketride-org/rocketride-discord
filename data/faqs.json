@@ -1,0 +1,65 @@
+[
+  {
+    "category": "Setup",
+    "question": "How do I get started with RocketRide?",
+    "answer": "If you are new to RocketRide, use the quick start guide and tutorial shared by the team to get set up and building. The team shared both a step-by-step guide for setup and demos and a quick guide video for first-time users.",
+    "needs_answer": false,
+    "mentions": 2
+  },
+  {
+    "category": "Usage",
+    "question": "How do I use RocketRide?",
+    "answer": "If you are new to RocketRide, start with the official quick-start materials shared by the team, including the setup guide and quick guide video.",
+    "needs_answer": false,
+    "mentions": 1
+  },
+  {
+    "category": "Cloud",
+    "question": "How can I share a RocketRide Cloud pipeline with teammates?",
+    "answer": "You can share the endpoint information or URL of your pipeline so teammates can connect to it over HTTP.",
+    "needs_answer": false,
+    "mentions": 1
+  },
+  {
+    "category": "Integrations",
+    "question": "Does RocketRide support connectors like Google, Slack, Gmail, and Calendar?",
+    "answer": "",
+    "needs_answer": true,
+    "mentions": 1
+  },
+  {
+    "category": "Concepts",
+    "question": "Does RocketRide use FalkorDB to save and recall memories?",
+    "answer": "",
+    "needs_answer": true,
+    "mentions": 1
+  },
+  {
+    "category": "Errors",
+    "question": "Why does my RocketRide Cloud API key get a 403 on the WebSocket upgrade at api.rocketride.ai?",
+    "answer": "",
+    "needs_answer": true,
+    "mentions": 1
+  },
+  {
+    "category": "Errors",
+    "question": "Why does the public Docker engine image fail to start when using ghcr.io/rocketride-org/rocketride-engine:latest?",
+    "answer": "",
+    "needs_answer": true,
+    "mentions": 1
+  },
+  {
+    "category": "Events",
+    "question": "Will RocketRide live sessions be recorded, and where can I watch the recording?",
+    "answer": "Yes. The team said recordings will be shared afterward, and one session recording was posted on RocketRide's YouTube: https://www.youtube.com/watch?v=M_MXCZjD98c",
+    "needs_answer": false,
+    "mentions": 3
+  },
+  {
+    "category": "Open Source",
+    "question": "How can I contribute to RocketRide open source?",
+    "answer": "RocketRide's open-source repository is here: https://github.com/rocketride-org/rocketride-server. Contributing guidelines are in the CONTRIBUTING.md file in that repository.",
+    "needs_answer": false,
+    "mentions": 2
+  }
+]

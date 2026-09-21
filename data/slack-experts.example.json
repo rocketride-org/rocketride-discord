@@ -1,0 +1,22 @@
+{
+  "_comment": "TEMPLATE — copy to slack-experts.json (gitignored) and fill in real Slack member IDs. Get an ID in Slack: profile → ••• → Copy member ID (looks like U0123ABCD). The LLM picks an 'areas' tag from the keys below; the program maps each area to member IDs (skill = fan out to everyone with that skill; members = explicit list). ALLOWLIST: only escalations that resolve to a routed owner are posted to Slack — anything uncategorized (Triage, or no match) is SKIPPED entirely.",
+  "experts": [
+    { "name": "Reviewer One",  "slack": "U000000001", "skills": ["TS", "Python"] },
+    { "name": "Reviewer Two",  "slack": "U000000002", "skills": ["TS", "C++", "Engine"] },
+    { "name": "Docs/Infra",    "slack": "U000000003", "skills": ["Infra", "Docs"] },
+    { "name": "Deps Owner",    "slack": "U000000004", "skills": ["Python", "Deps"] },
+    { "name": "Ops One",       "slack": "U000000005", "skills": ["Ops"] },
+    { "name": "Ops Two",       "slack": "U000000006", "skills": ["Ops"] }
+  ],
+  "areas": {
+    "Engine":      { "members": ["U000000002"], "hint": "engine runtime, pipeline execution, node crashes, client↔engine connection failures" },
+    "Infra":       { "members": ["U000000003"], "hint": "deployment, Docker engine image, hosting, CI infrastructure" },
+    "Deps":        { "members": ["U000000004"], "hint": "dependency/build constraint issues (onnxruntime, package pin conflicts, nodes:build)" },
+    "Docs":        { "members": ["U000000003"], "hint": "documentation gaps, how-to-contribute, version-support facts" },
+    "TS":          { "members": ["U000000001"], "hint": "TypeScript SDK, app-sdk packaging, VSCode/Cursor extension behavior" },
+    "Python":      { "skill": "Python", "hint": "Python version support and Python SDK questions — tag EVERYONE who knows Python" },
+    "Integration": { "members": ["U000000001"], "hint": "how to use/build/integrate RocketRide, getting started, connectors" },
+    "Ops":         { "members": ["U000000005", "U000000006"], "hint": "accounts, login, OTP, developer id, access provisioning, Cloud key enablement, billing" },
+    "Triage":      { "members": [], "hint": "no-fit sink — use when NOTHING else fits: events/hackathons, business/partnership/press/investor topics, a lone greeting, or text with no usable signal (image-only, bare email). Resolves to no owner, so the escalation is SKIPPED (not posted to Slack)." }
+  }
+}

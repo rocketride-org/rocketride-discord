@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Client, GatewayIntentBits, Events, ThreadChannel, type Message } from 'discord.js';
+import { Client, GatewayIntentBits, Events, ThreadChannel, ContextMenuCommandBuilder, ApplicationCommandType, type Message } from 'discord.js';
 import { RocketRideClient } from 'rocketride';
+import { initSlackRouter, notifyEscalation, escalateManually } from './slack-router';
+import { sanitizeReply } from './reply-sanitize';
 
 // RocketRide support bot ("Rocket Ralph") — MAIN support channel, webhook + multi-modal.
 // - The user's typed text and each image/audio/video attachment are sent to the
@@ -31,6 +33,12 @@ const MENTION_CHANNEL_ID = process.env.SUPPORT_MENTION_CHANNEL_ID ?? '1480957995
 const TEST_MODE = !!(process.env.TEST_ALLOW_BOT_IDS ?? '').trim();
 const ESCALATION_ROLE_ID = process.env.SUPPORT_ESCALATION_ROLE_ID || '1331418231113650196'; // @RocketRide team
 const ROLE_MENTION = `<@&${ESCALATION_ROLE_ID}>`;
+
+// "Escalate to Slack" message command (right-click a message → Apps). Access is gated to anyone
+// with the @RocketRide team role, PLUS any explicit user IDs listed here (comma-separated). The
+// ephemeral reply keeps the whole interaction private to the invoker.
+const ESCALATE_COMMAND = 'Escalate to Slack';
+const ESCALATE_USER_IDS = (process.env.SUPPORT_ESCALATE_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
 // When a message is aimed at another person (@-mentions someone else, or replies to a
 // message that isn't the bot's), Ralph reacts with this emoji and — inside a thread —
@@ -140,17 +148,22 @@ function chunk(text: string, size = CHUNK_SIZE): string[] {
 }
 
 // --- engine connection ------------------------------------------------------
-// The local engine (launched by the VSCode extension) listens on a DYNAMIC port
-// that changes on every engine restart, so a baked-in URI goes stale. Detect the
-// engine's current listen port the same way start-bots.sh does.
+// The local engine (launched by the VSCode extension) listens on a DYNAMIC port that changes
+// on every engine restart, so a baked-in URI goes stale. The client-facing engine is the
+// `eaas.py` process; per-pipeline TASK processes ALSO listen (on debug/data ports), so a plain
+// "grep engine | head -1" can grab a task port (e.g. another bot's running pipeline) and connect
+// to a dead end. Match eaas first, then fall back to any engine listener, then ROCKETRIDE_URI.
 function detectEngineUri(): string {
-	try {
-		const out = execSync(
-			"lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i engine | grep '127.0.0.1' | sed -E 's/.*:([0-9]+).*/\\1/' | head -1",
-			{ encoding: 'utf8', shell: '/bin/bash' },
-		).trim();
-		if (out) return `http://localhost:${out}`;
-	} catch {}
+	const sh = (cmd: string): string => {
+		try { return execSync(cmd, { encoding: 'utf8', shell: '/bin/bash' }).trim(); } catch { return ''; }
+	};
+	const eaasPid = sh("ps ax -o pid=,command= | grep -i engine | grep -i eaas | grep -v grep | awk '{print $1}' | head -1");
+	if (eaasPid) {
+		const port = sh(`lsof -nP -iTCP -sTCP:LISTEN -a -p ${eaasPid} 2>/dev/null | grep 127.0.0.1 | sed -E 's/.*:([0-9]+).*/\\1/' | head -1`);
+		if (port) return `http://localhost:${port}`;
+	}
+	const any = sh("lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i engine | grep '127.0.0.1' | sed -E 's/.*:([0-9]+).*/\\1/' | head -1");
+	if (any) return `http://localhost:${any}`;
 	return process.env.ROCKETRIDE_URI ?? 'http://localhost:5565';
 }
 
@@ -359,13 +372,20 @@ async function handle(thread: ThreadChannel, msg: Message) {
 		}
 		log(`  parts: ${parts.map((p) => p.modality).join(', ')}`);
 		const results = await askRalph(parts);
-		const reply = injectRoleMention(await combineIfNeeded(results, msg.id, msg.content.trim()));
+		// Strip any leaked CrewAI/ReAct scratchpad ("Thought: …") before relaying — the agent
+		// occasionally emits its raw reasoning instead of a clean answer.
+		const reply = sanitizeReply(injectRoleMention(await combineIfNeeded(results, msg.id, msg.content.trim())), ROLE_MENTION);
 		// Never relay an engine/model error (or an empty result) to Discord — log it and stay quiet.
 		if (!reply.trim() || looksLikeError(reply)) {
 			log(`  !! suppressed non-answer (not relayed): ${reply.trim().slice(0, 160) || '(empty)'}`);
 			return;
 		}
-		if (reply.includes(ROLE_MENTION)) { pause(thread.id); log(`  escalated → thread ${thread.id} paused`); }
+		if (reply.includes(ROLE_MENTION)) {
+			const firstEscalation = !pausedThreads.has(thread.id); // page Slack once per thread, not on every follow-up
+			pause(thread.id);
+			log(`  escalated → thread ${thread.id} paused`);
+			if (firstEscalation) void notifyEscalation(thread, msg, reply, log); // best-effort; never blocks the reply
+		}
 		const chunks = chunk(reply);
 		log(`  reply in ${((Date.now() - started) / 1000).toFixed(1)}s: ${reply.length} chars, ${chunks.length} msg(s)`);
 		if (TEST_MODE) log(`  FULL REPLY [thread ${thread.id}]:\n${reply}\n  END REPLY`);
@@ -382,12 +402,21 @@ async function main() {
 
 	log(`pipelines: ${RALPH_PIPE} [${RALPH_SOURCE}] + ${SYNTH_PIPE}`);
 	loadPaused();
+	initSlackRouter(log);
 	await connectAndStart();
 
 	const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
-	discord.once(Events.ClientReady, (c) => {
+	discord.once(Events.ClientReady, async (c) => {
 		log(`bot online as ${c.user.tag} — primary channel ${CHANNEL_ID}${MENTION_CHANNEL_ID ? `, mention-only channel ${MENTION_CHANNEL_ID}` : ''} (webhook + multi-modal, replies in threads)`);
+		// Register the "Escalate to Slack" message context-menu command per guild (instant, vs
+		// global commands' ~1h propagation). Upsert-by-name, so re-running on restart is harmless.
+		// Access is enforced in the interaction handler (team role / allowlist), not by Discord perms.
+		const cmd = new ContextMenuCommandBuilder().setName(ESCALATE_COMMAND).setType(ApplicationCommandType.Message);
+		for (const guild of c.guilds.cache.values()) {
+			try { await guild.commands.create(cmd); log(`  registered "${ESCALATE_COMMAND}" in ${guild.name}`); }
+			catch (err) { log(`  !! could not register "${ESCALATE_COMMAND}" in ${guild.name} (re-invite the bot with the applications.commands scope): ${err instanceof Error ? err.message : err}`); }
+		}
 		log('waiting for messages... (Ctrl+C to stop)');
 	});
 
@@ -460,6 +489,47 @@ async function main() {
 		}
 	});
 
+	// "Escalate to Slack" message command: right-click a message → Apps → Escalate to Slack.
+	// Gated to the @RocketRide team role (or an allowlisted user); the reply is ephemeral so the
+	// whole interaction stays private to the invoker. Unlike auto-escalation this ALWAYS posts.
+	discord.on(Events.InteractionCreate, async (interaction) => {
+		if (!interaction.isMessageContextMenuCommand() || interaction.commandName !== ESCALATE_COMMAND) return;
+		await interaction.deferReply({ ephemeral: true }).catch(() => {});
+		// Access gate: @RocketRide team role, or an explicit allowlisted user ID.
+		let authorized = ESCALATE_USER_IDS.includes(interaction.user.id);
+		if (!authorized && interaction.inGuild()) {
+			const member = await interaction.guild!.members.fetch(interaction.user.id).catch(() => null);
+			authorized = Boolean(member?.roles.cache.has(ESCALATION_ROLE_ID));
+		}
+		if (!authorized) {
+			log(`escalate: denied for ${interaction.user.username}`);
+			await interaction.editReply(`🚫 Only the **@RocketRide team** can escalate to Slack.`).catch(() => {});
+			return;
+		}
+		const target = interaction.targetMessage;
+		const targetText = target.content?.trim() ?? '';
+		const attNames = [...target.attachments.values()].map((a) => a.name).filter(Boolean);
+		if (!targetText && !attNames.length) {
+			await interaction.editReply('Nothing to escalate — that message has no text or attachments.').catch(() => {});
+			return;
+		}
+		const result = await escalateManually({
+			text: targetText,
+			authorName: target.member?.displayName ?? target.author.globalName ?? target.author.username,
+			messageUrl: target.url,
+			escalatorName: interaction.user.globalName ?? interaction.user.username,
+			attachmentsNote: attNames.length ? ` [attachments: ${attNames.join(', ')}]` : '',
+		}, log);
+		if (result.ok) {
+			const who = result.owners ? `tagged **${result.label}** (${result.owners} owner${result.owners === 1 ? '' : 's'})` : 'posted **untagged** — no area matched, please self-assign';
+			log(`escalate: ${interaction.user.username} → Slack (${result.label}, ${result.owners} owner(s))`);
+			await interaction.editReply(`✅ Escalated to Slack — ${who}.`).catch(() => {});
+		} else {
+			log(`escalate: failed for ${interaction.user.username}: ${result.reason}`);
+			await interaction.editReply(`⚠️ Couldn't escalate: ${result.reason}`).catch(() => {});
+		}
+	});
+
 	const shutdown = async () => {
 		log('shutting down...');
 		if (RALPH_TOKEN) { try { await RR?.terminate(RALPH_TOKEN); } catch {} }
@@ -482,7 +552,12 @@ if (process.argv.includes('--send-once')) {
 	connectAndStart()
 		.then(() => askRalph([{ modality: 'text', name: `${reqId}-message.txt`, mimetype: 'text/plain', data: prompt }]))
 		.then((r) => combineIfNeeded(r, reqId, prompt))
-		.then((a) => console.log('\n--- answer ---\n' + injectRoleMention(a)))
+		.then((a) => {
+			const raw = injectRoleMention(a);
+			const shown = sanitizeReply(raw, ROLE_MENTION);
+			console.log('\n--- raw pipeline output ---\n' + raw);
+			console.log('\n--- shown on Discord (after sanitize) ---\n' + (shown.trim() ? shown : '(empty → bot stays quiet, nothing posted)'));
+		})
 		.then(() => RR?.disconnect())
 		.then(() => process.exit(0))
 		.catch((err) => { console.error('Fatal:', err instanceof Error ? err.message : err); process.exit(1); });

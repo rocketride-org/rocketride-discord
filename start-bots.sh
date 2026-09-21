@@ -5,6 +5,7 @@
 #   support-test  -> support-test.ts   (Rocket Ralph → CLOUD pipeline via webhook, multi-modal)
 #   scheduler     -> scheduler.ts      (Post Scheduler; needs Redis)
 #   social        -> social.ts         (Social announcer; in-process schedule)
+#   faq           -> faq.ts            (FAQ builder → LOCAL engine; nightly, writes data/faqs.json)
 #
 # Usage:
 #   ./start-bots.sh                    # start ALL bots
@@ -18,7 +19,7 @@ cd "$(dirname "$0")"
 export PATH="/Users/discordbot/.nvm/versions/node/v26.3.0/bin:$PATH"
 mkdir -p logs
 
-ALL="showcase support support-test scheduler social"
+ALL="showcase support support-test scheduler social faq"
 
 # The launch command for a given bot (portable case, not a bash-4 assoc array).
 launch_cmd() {
@@ -28,6 +29,7 @@ launch_cmd() {
     support-test) echo "./node_modules/.bin/tsx support-test.ts" ;;
     scheduler)    echo "./node_modules/.bin/tsx scheduler.ts" ;;
     social)       echo "./node_modules/.bin/tsx social.ts" ;;
+    faq)          echo "./node_modules/.bin/tsx faq.ts" ;;
     *)            echo "" ;;
   esac
 }

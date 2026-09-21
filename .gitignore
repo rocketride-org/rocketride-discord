@@ -11,6 +11,9 @@ logs/
 # RocketRide SDK docs fetched locally (see refresh-docs.sh)
 .rocketride/
 
+# private Slack routing directory (real member IDs) — commit slack-experts.example.json instead
+data/slack-experts.json
+
 # OS / editor junk
 .DS_Store
 **/.DS_Store

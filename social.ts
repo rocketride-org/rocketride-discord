@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { REST, Routes, EmbedBuilder } from 'discord.js';
+import type { RawFile } from '@discordjs/rest';
 import { DateTime } from 'luxon';
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -98,7 +99,10 @@ async function fetchYouTube(limit: number): Promise<FeedItem[]> {
 			platform: 'youtube', id: vid ?? '', title: it.snippet?.title ?? '(untitled)', url: `https://www.youtube.com/watch?v=${vid}`,
 			published: new Date(it.contentDetails?.videoPublishedAt ?? it.snippet?.publishedAt ?? Date.now()),
 			author: it.snippet?.videoOwnerChannelTitle ?? title,
-			thumbnail: (th.maxres ?? th.high ?? th.medium ?? th.default)?.url ?? (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : undefined),
+			// Prefer `high` (always generated on upload) over `maxres`: maxresdefault.jpg 404s
+			// for the first minutes of a new upload (and often forever for Shorts), which made
+			// fresh videos post with a broken preview. hqdefault is the guaranteed fallback.
+			thumbnail: (th.high ?? th.medium ?? th.default ?? th.maxres)?.url ?? (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : undefined),
 		};
 	}).filter((x: FeedItem) => x.id).sort((a: FeedItem, b: FeedItem) => b.published.getTime() - a.published.getTime()).slice(0, limit);
 }
@@ -302,9 +306,39 @@ const SOCIAL_ICONS: Record<string, string> = {
 const SOCIAL_LABELS: Record<string, string> = { youtube: 'New RocketRide video on YouTube', x: '𝕏  New RocketRide post on X', newsletter: '✉  New RocketRide newsletter', instagram: 'New RocketRide post on Instagram', linkedin: 'New RocketRide post on LinkedIn' };
 const socialKey = (it: FeedItem) => `${it.platform}:${it.id}`;
 
-function socialEmbed(it: FeedItem) {
-	// Minimal card: brand icon + linked title + the fetched image. For video/reels the
-	// API gives a preview image (thumbnail_url) — Discord can't inline-play the video.
+// Download the preview image so we can upload it AS a Discord attachment instead of
+// handing Discord an external URL to proxy. Fixes two failure modes:
+//   1) Discord resolves an external embed image ONCE, at post time. If that server-side
+//      fetch fails/times out (a burst of posts, or a just-published image the CDN isn't
+//      serving yet), Discord records width/height = 0 and never retries — the preview is
+//      permanently blank even though the URL later works. An uploaded file is measured
+//      from its bytes and always renders.
+//   2) Instagram/LinkedIn media URLs are signed and expire (~weeks), after which even a
+//      previously-good preview goes blank. A Discord-hosted attachment never expires.
+// Best-effort: returns undefined on any failure so the caller falls back to the URL.
+const IMG_MAGIC: Array<[string, (b: Buffer) => boolean]> = [
+	['jpg', (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+	['png', (b) => b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47],
+	['gif', (b) => b.length >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46],
+	['webp', (b) => b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP'],
+];
+const MAX_ATTACH_BYTES = 8 * 1024 * 1024; // stay well under Discord's upload cap
+async function fetchImageAttachment(url: string): Promise<RawFile | undefined> {
+	try {
+		const res = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { 'user-agent': 'rocketride-social/1.0' } });
+		if (!res.ok) return undefined;
+		const buf = Buffer.from(await res.arrayBuffer());
+		if (!buf.length || buf.length > MAX_ATTACH_BYTES) return undefined;
+		const ext = IMG_MAGIC.find(([, test]) => test(buf))?.[0];
+		if (!ext) return undefined; // not a recognized image (e.g. an HTML error page) — fall back to URL
+		return { name: `preview.${ext}`, data: buf, contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}` };
+	} catch { return undefined; }
+}
+
+// Build the message payload for one item: the minimal card (brand icon + linked title +
+// image) and, when the image downloaded, the file to upload alongside it. For video/reels
+// the API gives a preview image — Discord can't inline-play the video.
+async function buildSocialPost(it: FeedItem): Promise<{ embed: any; files: RawFile[] }> {
 	const e = new EmbedBuilder()
 		.setColor(SOCIAL_COLORS[it.platform] ?? 0x5865f2)
 		.setAuthor({ name: SOCIAL_LABELS[it.platform] ?? it.platform, iconURL: SOCIAL_ICONS[it.platform] })
@@ -313,8 +347,13 @@ function socialEmbed(it: FeedItem) {
 	// X (post body) and newsletter (excerpt) show a description; YouTube, Instagram, and
 	// LinkedIn stay title + image only.
 	if ((it.platform === 'x' || it.platform === 'newsletter') && it.text) e.setDescription(it.text.slice(0, 4096));
-	if (it.thumbnail) e.setImage(it.thumbnail);
-	return e.toJSON();
+	const files: RawFile[] = [];
+	if (it.thumbnail) {
+		const att = await fetchImageAttachment(it.thumbnail);
+		if (att) { e.setImage(`attachment://${att.name}`); files.push(att); }
+		else e.setImage(it.thumbnail); // download failed — hand Discord the URL as a best-effort fallback
+	}
+	return { embed: e.toJSON(), files };
 }
 
 // One pass: fetch every configured source, then post only items newer than each
@@ -365,7 +404,8 @@ async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean; only?:
 	let posted = 0;
 	for (const it of toPost) {
 		try {
-			await rest.post(Routes.channelMessages(SOCIAL.channelId), { body: { embeds: [socialEmbed(it)] } });
+			const { embed, files } = await buildSocialPost(it);
+			await rest.post(Routes.channelMessages(SOCIAL.channelId), { body: { embeds: [embed] }, files });
 			state.seen.add(socialKey(it));
 			const wm = state.watermark[it.platform];
 			if (!wm || it.published.getTime() > new Date(wm).getTime()) state.watermark[it.platform] = it.published.toISOString();

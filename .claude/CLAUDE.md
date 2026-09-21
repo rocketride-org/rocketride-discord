@@ -14,7 +14,7 @@ Only 4 existing posts in the channel — migration is a one-shot manual script.
 
 ## Repo structure after refactor
 showcase-moderator/
-  index.js        # bot entry point + interaction handler
+  showcase.js        # bot entry point + interaction handler
   deploy.js       # one-shot slash command registration
   migrate.js      # one-shot migration runner, delete after use
   package.json
@@ -22,7 +22,7 @@ showcase-moderator/
   .claude/
     settings.local.json   # do not touch
 
-## Constants (top of index.js)
+## Constants (top of showcase.js)
 TRACK_COLORS = {
   'Startup':       0x5865F2,
   'Internal Tool': 0xFEE75C,
@@ -47,7 +47,7 @@ Register exactly three slash commands against the guild:
   /setup    — no options
   /migrate  — DO NOT register this. It is a standalone script, not a slash command.
 
-## Phase 2 — rewrite index.js
+## Phase 2 — rewrite showcase.js
 Remove ALL existing logic. Fresh interactionCreate handler only.
 
 ### /submit
@@ -120,7 +120,7 @@ Fields in order:
 7. Reply ephemeral: "Channel locked and pinned how-to posted."
 
 ## Phase 3 — migrate.js (standalone, delete after use)
-This script runs independently with its own Client login, not part of index.js.
+This script runs independently with its own Client login, not part of showcase.js.
 
 Steps:
 1. Login with DISCORD_TOKEN
@@ -152,7 +152,7 @@ Steps:
 If a message can't be parsed (missing required fields), log a warning and skip it.
 Do not throw — process remaining messages.
 
-## Intents required (index.js)
+## Intents required (showcase.js)
 GatewayIntentBits.Guilds
 GatewayIntentBits.GuildMessages
 
@@ -173,10 +173,10 @@ must be re-run on the Pi before starting the bot.
 No other new dependencies.
 
 ## Instructions for Claude Code
-1. Read existing index.js in full before writing anything
+1. Read existing showcase.js in full before writing anything
 2. Read package.json — check discord.js version, update if needed
 3. Write deploy.js
 4. Write migrate.js
-5. Rewrite index.js from scratch — do not preserve any old logic
+5. Rewrite showcase.js from scratch — do not preserve any old logic
 6. Do not run node, npm start, or node deploy.js
 7. Do not modify .claude/settings.local.json
