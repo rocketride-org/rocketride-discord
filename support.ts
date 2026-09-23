@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Client, GatewayIntentBits, Events, ThreadChannel, ContextMenuCommandBuilder, ApplicationCommandType, type Message } from 'discord.js';
+import { Client, GatewayIntentBits, Events, ThreadChannel, ContextMenuCommandBuilder, ApplicationCommandType, Partials, type Message, type MessageReaction, type PartialMessageReaction, type User, type PartialUser } from 'discord.js';
 import { RocketRideClient } from 'rocketride';
 import { initSlackRouter, notifyEscalation, escalateManually } from './slack-router';
+import { recordQuestion, recordThreadMessage, recordRalphReply, recordNoReply, recordReaction, isTeamMember } from './eval/capture';
 import { sanitizeReply } from './reply-sanitize';
 
 // RocketRide support bot ("Rocket Ralph") — MAIN support channel, webhook + multi-modal.
@@ -39,6 +40,11 @@ const ROLE_MENTION = `<@&${ESCALATION_ROLE_ID}>`;
 // ephemeral reply keeps the whole interaction private to the invoker.
 const ESCALATE_COMMAND = 'Escalate to Slack';
 const ESCALATE_USER_IDS = (process.env.SUPPORT_ESCALATE_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+
+// Eval (see eval/capture.ts): when EVAL_FEEDBACK_REACTIONS=true, Ralph adds ✅/❌ affordances to
+// each answer and records the asker's grade. Capture of questions/replies/hand-offs is always on
+// (guarded — it never throws into Ralph's reply path).
+const EVAL_REACTIONS = process.env.EVAL_FEEDBACK_REACTIONS === 'true';
 
 // When a message is aimed at another person (@-mentions someone else, or replies to a
 // message that isn't the bot's), Ralph reacts with this emoji and — inside a thread —
@@ -378,6 +384,7 @@ async function handle(thread: ThreadChannel, msg: Message) {
 		// Never relay an engine/model error (or an empty result) to Discord — log it and stay quiet.
 		if (!reply.trim() || looksLikeError(reply)) {
 			log(`  !! suppressed non-answer (not relayed): ${reply.trim().slice(0, 160) || '(empty)'}`);
+			recordNoReply(thread, looksLikeError(reply) ? 'model_error' : 'empty'); // eval: Ralph produced no usable answer
 			return;
 		}
 		if (reply.includes(ROLE_MENTION)) {
@@ -389,9 +396,17 @@ async function handle(thread: ThreadChannel, msg: Message) {
 		const chunks = chunk(reply);
 		log(`  reply in ${((Date.now() - started) / 1000).toFixed(1)}s: ${reply.length} chars, ${chunks.length} msg(s)`);
 		if (TEST_MODE) log(`  FULL REPLY [thread ${thread.id}]:\n${reply}\n  END REPLY`);
-		for (const part of chunks) await thread.send({ content: part, allowedMentions: { roles: [ESCALATION_ROLE_ID] } });
+		const sentIds: string[] = [];
+		for (const part of chunks) { const sent = await thread.send({ content: part, allowedMentions: { roles: [ESCALATION_ROLE_ID] } }); sentIds.push(sent.id); }
+		recordRalphReply(thread, sentIds, reply); // eval: the posted answer + its classification (answer/escalation/dead-end)
+		if (EVAL_REACTIONS && sentIds.length) {
+			// ✅/❌ affordances on the last chunk so the asker can grade the answer in one click
+			const last = await thread.messages.fetch(sentIds[sentIds.length - 1]).catch(() => null);
+			if (last) { await last.react('✅').catch(() => {}); await last.react('❌').catch(() => {}); }
+		}
 	} catch (err) {
 		log(`  !! error (not relayed): ${err instanceof Error ? err.message : String(err)}`);
+		try { recordNoReply(thread, 'exception', err instanceof Error ? err.message : String(err)); } catch {} // eval
 	}
 }
 
@@ -405,7 +420,7 @@ async function main() {
 	initSlackRouter(log);
 	await connectAndStart();
 
-	const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+	const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessageReactions], partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User] });
 
 	discord.once(Events.ClientReady, async (c) => {
 		log(`bot online as ${c.user.tag} — primary channel ${CHANNEL_ID}${MENTION_CHANNEL_ID ? `, mention-only channel ${MENTION_CHANNEL_ID}` : ''} (webhook + multi-modal, replies in threads)`);
@@ -452,6 +467,7 @@ async function main() {
 				await msg.reply('I need permission to create a thread here — please grant **Create Public Threads** and **Send Messages in Threads**.').catch(() => {});
 				return;
 			}
+			recordQuestion(msg, thread.id); // eval: record the opening question + open the thread row
 			await handle(thread, msg);
 			return;
 		}
@@ -464,6 +480,9 @@ async function main() {
 		) {
 			const thread = msg.channel as ThreadChannel;
 			const mentioned = msg.mentions.users.has(botId);
+			// eval: record every thread message — a team reply counts as "a human stepped in",
+			// even when Ralph stays quiet (paused / aimed elsewhere), so record BEFORE any return.
+			recordThreadMessage(thread, msg, isTeamMember(msg.member, msg.author.id) ? (mentioned ? 'team_mention' : 'team_reply') : 'user_message');
 			// Fast path = the persisted set. The first time we see a thread this process (e.g.
 			// after a restart), reconcile with Discord history so an escalation pause is restored
 			// even if the state file was lost.
@@ -530,6 +549,29 @@ async function main() {
 		}
 	});
 
+	// eval: ✅/❌ on one of Ralph's replies = the asker grading the answer. Records the toggle;
+	// guarded so a bad reaction event never affects the bot.
+	if (EVAL_REACTIONS) {
+		const onReaction = async (reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser, added: boolean) => {
+			try {
+				if (user.bot) return;
+				if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
+				const emoji = reaction.emoji.name;
+				if (emoji !== '✅' && emoji !== '❌') return;
+				const message = reaction.message;
+				if (message.partial) { try { await message.fetch(); } catch { return; } }
+				if (!message.channel.isThread()) return;
+				const parentId = (message.channel as ThreadChannel).parentId;
+				if (parentId !== CHANNEL_ID && !(MENTION_CHANNEL_ID && parentId === MENTION_CHANNEL_ID)) return;
+				if (message.author?.id !== discord.user!.id) return; // only reactions on Ralph's own messages
+				recordReaction(message.channelId, message.id, emoji, user.id, added);
+				log(`eval: ${added ? 'added' : 'removed'} ${emoji} by ${user.id} on msg ${message.id}`);
+			} catch (e) { log(`  !! eval reaction: ${e instanceof Error ? e.message : e}`); }
+		};
+		discord.on(Events.MessageReactionAdd, (r, u) => void onReaction(r, u, true));
+		discord.on(Events.MessageReactionRemove, (r, u) => void onReaction(r, u, false));
+	}
+
 	const shutdown = async () => {
 		log('shutting down...');
 		if (RALPH_TOKEN) { try { await RR?.terminate(RALPH_TOKEN); } catch {} }
@@ -561,6 +603,28 @@ if (process.argv.includes('--send-once')) {
 		.then(() => RR?.disconnect())
 		.then(() => process.exit(0))
 		.catch((err) => { console.error('Fatal:', err instanceof Error ? err.message : err); process.exit(1); });
+} else if (process.argv.includes('--send-batch')) {
+	// `tsx support.ts --send-batch <file.jsonl> --json` runs each {id,question} through the same
+	// answer path and prints one JSON line per case. Used by the eval replay runner (Phase 5).
+	// The replay runner points PIPE / SYNTH_PIPE at ISOLATED copies so this never hits prod.
+	const file = process.argv[process.argv.indexOf('--send-batch') + 1];
+	const runId = `batch-${Date.now()}`;
+	(async () => {
+		const lines = readFileSync(file, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean);
+		await connectAndStart();
+		for (const line of lines) {
+			let item: any; try { item = JSON.parse(line); } catch { continue; }
+			const reqId = `${runId}-${item.id}`;
+			try {
+				const r = await askRalph([{ modality: 'text', name: `${reqId}-message.txt`, mimetype: 'text/plain', data: String(item.question) }]);
+				const raw = injectRoleMention(await combineIfNeeded(r, reqId, String(item.question)));
+				const shown = sanitizeReply(raw, ROLE_MENTION);
+				console.log(JSON.stringify({ id: item.id, raw, shown, escalated: shown.includes(ROLE_MENTION) }));
+			} catch (e) { console.log(JSON.stringify({ id: item.id, error: e instanceof Error ? e.message : String(e) })); }
+		}
+		await RR?.disconnect();
+		process.exit(0);
+	})().catch((err) => { console.error('Fatal:', err instanceof Error ? err.message : err); process.exit(1); });
 } else {
 	main().catch((err) => { console.error('Fatal:', err instanceof Error ? err.message : err); process.exit(1); });
 }

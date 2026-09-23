@@ -4,7 +4,7 @@
 #   ./status-bots.sh support      # just one
 cd "$(dirname "$0")"
 
-ALL="showcase support support-test scheduler social"
+ALL="showcase support support-test scheduler social faq eval"
 
 for name in ${*:-$ALL}; do
   pidfile="logs/$name.pid"
