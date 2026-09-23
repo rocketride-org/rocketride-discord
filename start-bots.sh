@@ -19,7 +19,7 @@ cd "$(dirname "$0")"
 export PATH="/Users/discordbot/.nvm/versions/node/v26.3.0/bin:$PATH"
 mkdir -p logs
 
-ALL="showcase support support-test scheduler social faq"
+ALL="showcase support support-test scheduler social faq eval"
 
 # The launch command for a given bot (portable case, not a bash-4 assoc array).
 launch_cmd() {
@@ -30,6 +30,7 @@ launch_cmd() {
     scheduler)    echo "./node_modules/.bin/tsx scheduler.ts" ;;
     social)       echo "./node_modules/.bin/tsx social.ts" ;;
     faq)          echo "./node_modules/.bin/tsx faq.ts" ;;
+    eval)         echo "./node_modules/.bin/tsx eval/main.ts --serve" ;;
     *)            echo "" ;;
   esac
 }

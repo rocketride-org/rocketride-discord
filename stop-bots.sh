@@ -8,7 +8,7 @@
 #   ./stop-bots.sh support social  # stop several
 cd "$(dirname "$0")"
 
-ALL="showcase support support-test scheduler social"
+ALL="showcase support support-test scheduler social faq eval"
 
 stop_one() {
   local name="$1" pidfile="logs/$1.pid"
