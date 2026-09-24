@@ -113,20 +113,31 @@ marks a thread as human-resolved (not a Ralph solo win).
 failures-by-cause (`content_gap` marked 📄), policy floor, top clusters, doc-gap count, and grader
 agreement.
 
-**Review cards** — one per gradable thread, with team-gated controls:
+**Review cards** — one per gradable thread, team-gated. Each card leads with its current state
+and a one-line prompt so the reviewer knows the ask before clicking:
 
-| Control | Effect |
+- 🔵 **Needs a verdict** — Ralph answered but nothing confirmed it worked; you decide.
+- 🔴 **Counted as a miss** (with the reason) — confirm it, flip it, or teach the fix.
+- ✅ **Counted as resolved** / 🚫 **Excluded** — after a decision; can be flipped back.
+
+The controls are worded as plain outcomes (no enum jargon), and the **layout is always
+`[agree/keep] · [flip] · [exclude]`**:
+
+| Button | What happens when you click it |
 |---|---|
-| **cause…** (dropdown) | Set/correct the failure cause (`content_gap`, `retrieval_miss`, `policy_*`, `bad_answer`, …). |
-| **Confirm** | Accept the grader's label as-is (stamps reviewer + `*_source='review'`). |
-| **Mark resolved** | Override outcome → success (Ralph handled it). |
-| **Mark failed** | Override outcome → failure. |
-| **Exclude** | Drop the thread from the metric (not a real question / internal / noise). |
-| **Edit & approve Q/A** | Modal (question + drafted answer). On submit: approves the Q/A, seeds a **golden regression case**, and **ingests it straight into Ralph's KB** (`ROCKETRIDE_DOCS`) — no CLI step. |
-| **New issue** | Opens a pre-filled GitHub *new issue* page (a link — it does **not** auto-create; the bot is read-only on GitHub). |
+| ✅ **Ralph resolved it** / 👍 **Yes, resolved** | Counts the thread as a **success**. |
+| ❌ **Ralph missed it** / **Actually a miss** | Counts it **against** the success rate. |
+| 👍 **Yes, a miss** | Confirms the graded miss, **keeping** its specific reason. |
+| ✅ **Actually resolved** | Flips a graded miss to a **success**. |
+| 🚫 **Not a real question** | **Excludes** it from the metric (noise/internal). |
+| 📚 **Teach Ralph the answer** | Modal (question + answer). On submit: approves the Q/A, seeds a **golden regression case**, and **ingests it straight into Ralph's KB** (`ROCKETRIDE_DOCS`) — no CLI step. |
+| 🐛 **File a GitHub issue** | Opens a pre-filled *new issue* page (a link — it does **not** auto-create; the bot is read-only on GitHub). |
+| **reason ▾** (dropdown) | Sets/corrects why Ralph missed, in plain language (Doc gap, Retrieval miss, Bad answer, Policy…). |
 
-Buttons acknowledge instantly (deferred) so they never hit Discord's 3-second timeout — the `eval`
-bot must be running for them to respond.
+**Every click replies with a short ephemeral note** (visible only to the clicker) stating the effect —
+e.g. *"✅ Marked resolved — now counts as a success"* — and the card itself refreshes to the new
+state. Clicks acknowledge instantly (deferred) so they never hit Discord's 3-second timeout — the
+`eval` bot must be running for them to respond.
 
 ---
 

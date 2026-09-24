@@ -13,6 +13,22 @@ import { ingestApproved } from './ingest';
 
 const CAUSES = ['tool_error', 'engine_error', 'policy_public', 'policy_account', 'policy_other', 'product_defect', 'feature_request', 'content_gap', 'bad_answer', 'retrieval_miss', 'unknown'];
 const FAILS = ['deferred', 'deferred_unanswered', 'overridden', 'dead_end', 'no_reply', 'rejected', 'reasked'];
+// Plain-language names for the failure causes, shown on the card + in the dropdown so a reviewer
+// never has to decode the enum. The stored value stays the enum (metrics depend on it).
+const CAUSE_LABELS: Record<string, string> = {
+	tool_error: 'Tool error (GitHub/HTTP fetch failed)',
+	engine_error: 'Engine error (no reply / crash)',
+	policy_public: 'Policy — public info, should have answered',
+	policy_account: 'Policy — needs an account/human action',
+	policy_other: 'Policy — other escalation',
+	product_defect: 'Product bug',
+	feature_request: 'Feature request (not built yet)',
+	content_gap: 'Doc gap — answer not in the KB',
+	bad_answer: 'Bad answer — had the info, still wrong',
+	retrieval_miss: 'Retrieval miss — in KB but not surfaced',
+	unknown: 'Unknown / needs a look',
+};
+const causeText = (c?: string | null) => (c ? CAUSE_LABELS[c] ?? c : null);
 const pct = (n: number, d: number) => (d ? ((100 * n) / d).toFixed(1) + '%' : '—');
 const parse = (s: string | null) => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
 
@@ -76,36 +92,57 @@ export async function postWeeklySummary(client: Client, store: Store, log: (...a
 // ---------- review cards ----------
 function card(t: any, guildId: string): { embeds: EmbedBuilder[]; components: any[] } {
 	const g = parse(t.grader_json);
-	const qa = ''; // draft shown via the modal; keep the card compact
 	const link = `https://discord.com/channels/${guildId}/${t.thread_id}`;
+	const ct = causeText(t.cause);
+	const pending = t.outcome === 'resolved_unconfirmed';
+	const success = t.outcome === 'resolved_confirmed';
+	const excluded = t.outcome === 'excluded';
+
+	// Title + one-line "what to do", worded for the current state so the reviewer knows the ask
+	// before touching a button.
+	const head = excluded
+		? { color: 0x99AAB5, title: '🚫 Excluded from the metric', line: 'Not counted. Put it back below if that was wrong.' }
+		: success
+		? { color: 0x57F287, title: '✅ Counted as resolved (a win)', line: 'Ralph handled this one. Flip it below if that’s wrong.' }
+		: pending
+		? { color: 0x5865F2, title: '🔵 Needs a verdict — did Ralph resolve this?', line: 'Ralph answered, but nothing confirmed it worked. You decide.' }
+		: { color: 0xED4245, title: `🔴 Counted as a miss${ct ? ` — ${ct}` : ''}`, line: 'Ralph didn’t resolve this. Confirm it, flip it, or teach him the fix.' };
+
 	const embed = new EmbedBuilder()
-		.setTitle(`Review — ${t.outcome}${t.cause ? ` / ${t.cause}` : ''}`)
-		.setColor(t.outcome === 'resolved_unconfirmed' ? 0x5865F2 : 0xED4245)
-		.setDescription(`${String(t.question).slice(0, 300)}\n\n[open thread](${link})`)
+		.setTitle(head.title)
+		.setColor(head.color)
+		.setDescription(`${head.line}\n\n**Q:** ${String(t.question).slice(0, 280)}\n[open the real thread](${link})`)
 		.addFields(
 			{ name: 'Cluster', value: t.cluster_label ?? '—', inline: true },
-			{ name: 'q/a score', value: `${(t.q_top_score ?? 0).toFixed(2)} / ${t.a_top_score == null ? '—' : t.a_top_score.toFixed(2)}`, inline: true },
-			{ name: 'Grader summary', value: (g.summary ?? '—').slice(0, 300) },
+			{ name: 'q/a match', value: `${(t.q_top_score ?? 0).toFixed(2)} / ${t.a_top_score == null ? '—' : t.a_top_score.toFixed(2)}`, inline: true },
+			{ name: 'Why (grader)', value: (g.summary ?? '—').slice(0, 300) },
 		);
 	if (t.reviewed_by) embed.setFooter({ text: `reviewed by ${t.reviewed_by}` });
 
-	const causeSel = new StringSelectMenuBuilder().setCustomId(`eval:cause:${t.thread_id}`).setPlaceholder('cause…')
-		.addOptions(CAUSES.map((c) => ({ label: c, value: c, default: c === t.cause })));
-	const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-		new ButtonBuilder().setCustomId(`eval:confirm:${t.thread_id}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
-		...(t.outcome === 'resolved_unconfirmed' ? [
-			new ButtonBuilder().setCustomId(`eval:resolve:${t.thread_id}`).setLabel('Mark resolved').setStyle(ButtonStyle.Primary),
-			new ButtonBuilder().setCustomId(`eval:fail:${t.thread_id}`).setLabel('Mark failed').setStyle(ButtonStyle.Danger),
-		] : []),
-		new ButtonBuilder().setCustomId(`eval:exclude:${t.thread_id}`).setLabel('Exclude').setStyle(ButtonStyle.Secondary),
-	);
+	const btn = (id: string, label: string, emoji: string, style: ButtonStyle) =>
+		new ButtonBuilder().setCustomId(`eval:${id}:${t.thread_id}`).setLabel(label).setEmoji(emoji).setStyle(style);
+
+	// Verdict row — always: [agree/keep] [flip to the other verdict] [exclude/restore].
+	const verdict = pending
+		? [btn('resolve', 'Ralph resolved it', '✅', ButtonStyle.Success), btn('fail', 'Ralph missed it', '❌', ButtonStyle.Danger), btn('exclude', 'Not a real question', '🚫', ButtonStyle.Secondary)]
+		: success
+		? [btn('confirm', 'Yes, resolved', '👍', ButtonStyle.Success), btn('fail', 'Actually a miss', '❌', ButtonStyle.Danger), btn('exclude', 'Not a real question', '🚫', ButtonStyle.Secondary)]
+		: excluded
+		? [btn('resolve', 'Ralph resolved it', '✅', ButtonStyle.Success), btn('fail', 'Ralph missed it', '❌', ButtonStyle.Danger)]
+		: [btn('confirm', 'Yes, a miss', '👍', ButtonStyle.Success), btn('resolve', 'Actually resolved', '✅', ButtonStyle.Primary), btn('exclude', 'Not a real question', '🚫', ButtonStyle.Secondary)];
+
 	const issueUrl = `https://github.com/rocketride-org/rocketride-server/issues/new?title=${encodeURIComponent('[support] ' + String(t.question).slice(0, 80))}`.slice(0, 512);
-	const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-		new ButtonBuilder().setCustomId(`eval:qa:${t.thread_id}`).setLabel('Edit & approve Q/A').setStyle(ButtonStyle.Primary),
-		new ButtonBuilder().setLabel('New issue').setStyle(ButtonStyle.Link).setURL(issueUrl),
+	const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
+		btn('qa', 'Teach Ralph the answer', '📚', ButtonStyle.Primary),
+		new ButtonBuilder().setLabel('File a GitHub issue').setEmoji('🐛').setStyle(ButtonStyle.Link).setURL(issueUrl),
 	);
-	const row1 = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(causeSel);
-	return { embeds: [embed], components: [row1, row3, row4] };
+	const causeSel = new StringSelectMenuBuilder().setCustomId(`eval:cause:${t.thread_id}`)
+		.setPlaceholder(pending ? 'If it was a miss, set the reason…' : 'Change the reason it missed…')
+		.addOptions(CAUSES.map((c) => ({ label: (CAUSE_LABELS[c] ?? c).slice(0, 100), value: c, default: c === t.cause })));
+
+	const verdictRow = new ActionRowBuilder<ButtonBuilder>().addComponents(...verdict);
+	const causeRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(causeSel);
+	return { embeds: [embed], components: [verdictRow, actions, causeRow] };
 }
 
 export async function enqueueReviewCards(client: Client, store: Store, log: (...a: unknown[]) => void): Promise<void> {
@@ -128,10 +165,10 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 	// 'qa' opens a modal — a modal MUST be the first response, so never defer before it.
 	if (interaction.isButton() && action === 'qa') {
 		const draft = store.getLatestQaDraft(threadId) ?? {};
-		const modal = new ModalBuilder().setCustomId(`eval:qasave:${threadId}`).setTitle('Approve Q/A')
+		const modal = new ModalBuilder().setCustomId(`eval:qasave:${threadId}`).setTitle('Teach Ralph the answer')
 			.addComponents(
-				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('q').setLabel('Question').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.question ?? '').slice(0, 4000))),
-				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('a').setLabel('Answer (this becomes Ralph’s approved answer)').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.answer ?? '').slice(0, 4000))),
+				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('q').setLabel('Question (what users ask)').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.question ?? '').slice(0, 4000))),
+				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('a').setLabel('Answer — Ralph reuses this on similar Qs').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.answer ?? '').slice(0, 4000))),
 			);
 		await interaction.showModal(modal); return;
 	}
@@ -160,17 +197,35 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 	}
 
 	// Buttons/selects that mutate + refresh the card: ACK INSTANTLY (deferUpdate) so Discord never
-	// shows "didn't respond in time", THEN apply the change and edit the card in place.
+	// shows "didn't respond in time", apply the change, refresh the card, then tell the reviewer
+	// (ephemerally, just to them) exactly what that click did.
 	if (interaction.isButton() || interaction.isStringSelectMenu()) {
 		await interaction.deferUpdate().catch(() => {});
 		try {
-			if (interaction.isStringSelectMenu() && action === 'cause') store.applyReview(threadId, { cause: interaction.values[0] }, by);
-			else if (action === 'confirm') store.applyReview(threadId, {}, by);
-			else if (action === 'resolve') store.applyReview(threadId, { outcome: 'resolved_confirmed' }, by);
-			else if (action === 'fail') store.applyReview(threadId, { outcome: 'rejected' }, by);
-			else if (action === 'exclude') store.applyReview(threadId, { excluded_reason: 'manual' }, by);
+			let note = '';
+			if (interaction.isStringSelectMenu() && action === 'cause') {
+				const c = interaction.values[0];
+				store.applyReview(threadId, { cause: c }, by);
+				note = `Reason set to **${CAUSE_LABELS[c] ?? c}**.`;
+			} else if (action === 'confirm') {
+				store.applyReview(threadId, {}, by);
+				const cur = store.getThreadFull(threadId);
+				note = isFailure(cur?.outcome as Outcome)
+					? `👍 Confirmed as a miss${causeText(cur?.cause) ? ` (${causeText(cur?.cause)})` : ''} — counts against Ralph’s success rate.`
+					: '👍 Kept as resolved — counts as a success.';
+			} else if (action === 'resolve') {
+				store.applyReview(threadId, { outcome: 'resolved_confirmed' }, by);
+				note = '✅ Marked **resolved** — now counts as a success.';
+			} else if (action === 'fail') {
+				store.applyReview(threadId, { outcome: 'rejected' }, by);
+				note = '❌ Marked as a **miss** — now counts against Ralph’s success rate.';
+			} else if (action === 'exclude') {
+				store.applyReview(threadId, { excluded_reason: 'manual' }, by);
+				note = '🚫 **Excluded** — dropped from the metric (not a real question).';
+			}
 			const t = store.getThreadFull(threadId);
 			await interaction.editReply(card(t, interaction.guildId ?? ''));
+			if (note) await interaction.followUp({ content: note, ephemeral: true }).catch(() => {});
 		} catch (e) { /* already acked via deferUpdate; card just won't refresh */ }
 	}
 }
