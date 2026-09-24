@@ -54,6 +54,7 @@ nothing writes to production (the KB, the public FAQ) without a human approval s
 | `replay-seeds.md` | Candidate regression questions (drawn from real threads) for the golden set. |
 | `PHASE*.md` | Build notes per phase (how each was verified). |
 | `../pipelines/eval-grader.pipe` · `eval-judge.pipe` · `eval-retrieve.pipe` · `rag-eval.pipe` | The RocketRide pipes the eval drives. |
+| `bench/` | **Model bake-off** — compares grader LLMs on cost + label agreement. Read-only, off the production path; see [`bench/README.md`](bench/README.md). |
 | `../tests/eval/*.test.ts` | Unit tests for `rules` and `store` (`npm test`). |
 
 ---
@@ -170,6 +171,10 @@ state. Clicks acknowledge instantly (deferred) so they never hit Discord's 3-sec
 | Ralph's own answers (`rocket-ralph.pipe`) | `gpt-4-1` |
 
 All eval pipes run on the **local** engine and read/write the **local** qdrant `ROCKETRIDE_DOCS`.
+
+To compare the grader/judge model against cheaper or different providers (cost per call, cost per
+month, label agreement), see [`bench/README.md`](bench/README.md) — `tsx eval/bench/main.ts --estimate`
+needs no API key.
 
 ---
 
