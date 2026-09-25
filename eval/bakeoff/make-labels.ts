@@ -29,9 +29,8 @@ const numArg = (f: string, d: number) => { const i = args.indexOf(f); const v = 
 const OUT_JSONL = 'eval/bakeoff/labels.jsonl';
 const OUT_CONTEXT = 'eval/bakeoff/labels-context.md';
 
-export const OUTCOMES = ['excluded', 'deferred', 'deferred_unanswered', 'overridden', 'dead_end', 'no_reply', 'rejected', 'reasked', 'resolved_confirmed', 'resolved_unconfirmed'] as const;
-export const CAUSES = ['tool_error', 'engine_error', 'policy_public', 'policy_account', 'policy_other', 'product_defect', 'feature_request', 'content_gap', 'bad_answer', 'retrieval_miss', 'unknown'] as const;
-export const VERDICTS = ['pass', 'partial', 'fail'] as const;
+export { OUTCOMES, CAUSES, VERDICTS } from './enums';
+import { OUTCOMES, CAUSES, VERDICTS, NON_FAILURE } from './enums';
 
 const fnv1a = (s: string): number => {
 	let h = 0x811c9dc5;
@@ -40,7 +39,11 @@ const fnv1a = (s: string): number => {
 };
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ' …' : s);
 
-interface Texts { question: string; ralph: string[]; team: string[]; escalated: boolean }
+interface Texts {
+	question: string; ralph: string[]; team: string[]; escalated: boolean;
+	/** The grader's drafted standalone Q/A for this thread — what production actually feeds the judge. */
+	draftQ: string; draftA: string;
+}
 
 /** Second read-only pass for the message text the grader cases don't carry. */
 function loadTexts(threadIds: Set<string>): Map<string, Texts> {
@@ -54,9 +57,18 @@ function loadTexts(threadIds: Set<string>): Map<string, Texts> {
 			// here — an empty-string event text is present but useless.
 			const onThread = (db.prepare('SELECT question FROM threads WHERE thread_id = ?').get(id) as any)?.question;
 			const firstUser = rows.find((r) => r.type === 'user_message' && String(r.text ?? '').trim())?.text;
-			const opener = [rows.find((r) => r.type === 'question')?.text, onThread, firstUser]
-				.map((x) => String(x ?? '').trim()).find((x) => x.length > 0) ?? '';
+			const qa0 = db.prepare('SELECT question FROM qa_pairs WHERE thread_id = ? ORDER BY id DESC LIMIT 1').get(id) as any;
+			// Last resort: the grader's restated question. 9 threads have a usable golden but an
+			// opener that is a bare filename or emoji — recoverable rather than droppable.
+			const opener = [rows.find((r) => r.type === 'question')?.text, onThread, firstUser, qa0?.question]
+				.map((x) => String(x ?? '').trim()).find((x) => x.length >= 15) ?? '';
+			// replay.ts judges against golden_cases.golden_answer, which is seeded from an approved
+			// qa_pairs draft — a cleaned, standalone answer. Raw team messages are mostly routing
+			// chatter ("can you check this?"), which cannot serve as a golden.
+			const qa = db.prepare('SELECT question, answer FROM qa_pairs WHERE thread_id = ? ORDER BY id DESC LIMIT 1').get(id) as any;
 			out.set(id, {
+				draftQ: String(qa?.question ?? '').trim(),
+				draftA: String(qa?.answer ?? '').trim(),
 				question: opener,
 				ralph: rows.filter((r) => r.type === 'ralph_answer' && r.text).map((r) => String(r.text)),
 				team: rows.filter((r) => (r.type === 'team_reply' || r.type === 'team_mention') && r.text).map((r) => String(r.text)),
@@ -86,7 +98,7 @@ function corrupt(reply: string): string | null {
 
 function generate() {
 	const nGrader = numArg('--grader', 60);
-	const nJudge = numArg('--judge', 999);   // capped by how many threads have a team answer
+	const nJudge = numArg('--judge', 50);
 	const nWrong = numArg('--wrong', 40);
 	if (nWrong < 20) throw new Error('--wrong must be at least 20: a smaller set cannot measure a false-pass rate');
 
@@ -117,9 +129,9 @@ function generate() {
 	// precision depends on how many true-fail cases exist, not on how many threads do.
 	const judgeEligible = byHash.filter((c) => {
 		const t = texts.get(c.threadId)!;
-		// A judge case needs a real question to judge against — a one-word or image-only opener
-		// cannot be labelled, by a human or a model.
-		return t.question.trim().length >= 15 && t.team.some((x) => x.trim().length > 40) && t.ralph.some((x) => x.trim().length > 30);
+		// A judge case needs three things: a question, a reply to judge, and a golden that actually
+		// contains an answer. The last one is the binding constraint — see LABELS.md.
+		return t.question.trim().length >= 15 && t.draftA.length >= 120 && t.ralph.some((x) => x.trim().length > 30);
 	});
 	if (judgeEligible.length < nJudge) console.warn(`! only ${judgeEligible.length} threads have both a team answer and a Ralph reply — capping --judge at that`);
 	const judgePick = judgeEligible.slice(0, Math.min(nJudge, judgeEligible.length));
@@ -153,7 +165,7 @@ function generate() {
 
 	const judgeRow = (c: (typeof judgePick)[number], reply: string, perturbation: string | null) => {
 		const t = texts.get(c.threadId)!;
-		const golden = t.team.filter((x) => x.trim().length > 40).join('\n\n').trim();
+		const golden = t.draftA;
 		const id = `j-${c.threadId}${perturbation ? '-' + perturbation : ''}`;
 		rows.push({
 			kind: 'judge', id, threadId: c.threadId,
@@ -163,7 +175,9 @@ function generate() {
 		});
 		ctx.push(`## ${id}`, '');
 		if (perturbation) ctx.push(`> **Synthetic reply** (\`${perturbation}\`) — altered on purpose. Judge it on its merits anyway: if it still answers the question, label it \`pass\`.`, '');
-		ctx.push('**Question**', '', clip(t.question, 1200), '', '**Golden answer (from the team)**', '', clip(golden, 1500), '', '**Reply under test**', '', clip(reply, 1500), '');
+		ctx.push('**Question (what Ralph was answering)**', '', clip(t.question, 1200), '');
+		if (t.draftQ) ctx.push(`*restated by the grader as: ${clip(t.draftQ, 300)}*`, '');
+		ctx.push('**Golden answer** *(drafted from the team\'s messages — what production feeds the judge)*', '', clip(golden, 1500), '', '**Reply under test**', '', clip(reply, 1500), '');
 	};
 
 	// one real row per eligible thread
@@ -220,7 +234,7 @@ function validate() {
 			const cOk = !r.cause || (CAUSES as readonly string[]).includes(r.cause);
 			if (!oOk) problems.push(`${r.id}: outcome '${r.outcome}' is not a valid outcome`);
 			if (!cOk) problems.push(`${r.id}: cause '${r.cause}' is not a valid cause`);
-			const isFailure = !['resolved_confirmed', 'resolved_unconfirmed', 'excluded'].includes(r.outcome);
+			const isFailure = !(NON_FAILURE as readonly string[]).includes(r.outcome);
 			if (r.outcome && r.cause && !isFailure)
 				problems.push(`${r.id}: outcome '${r.outcome}' is not a failure, so cause must be empty`);
 			// A failure with no cause yet is simply unfinished — counted below, not reported as invalid.
@@ -234,10 +248,13 @@ function validate() {
 	});
 
 	const needCause = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
-		.filter((r) => r?.kind === 'grader' && r.outcome && !r.cause && !['resolved_confirmed', 'resolved_unconfirmed', 'excluded'].includes(r.outcome)).length;
+		.filter((r) => r?.kind === 'grader' && r.outcome && !r.cause && !(NON_FAILURE as readonly string[]).includes(r.outcome)).length;
 	console.log(`grader rows: ${gDone}/${grader} labelled${needCause ? `  (${needCause} have an outcome but still need a cause)` : ''}`);
 	console.log(`judge rows:  ${jDone}/${judge} labelled  (${wrongDone}/${wrong} of the synthetic ones)`);
-	const failLabels = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r?.kind === 'judge' && r.verdict === 'fail').length;
+	const parsed = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } });
+	const failLabels = parsed.filter((r) => r?.kind === 'judge' && r.verdict === 'fail').length;
+	const skipped = parsed.filter((r) => r?.kind === 'judge' && r.verdict === 'skip').length;
+	if (skipped) console.log(`judge rows marked 'skip' (broken case, excluded from every metric): ${skipped}`);
 	console.log(`judge rows labelled 'fail': ${failLabels} — this is the base for the false-pass rate`);
 	if (failLabels < 20 && jDone === judge) console.warn(`! fewer than 20 'fail' labels: a false-pass rate on this base has a wide interval`);
 	if (problems.length) { console.log(`\n${problems.length} problem(s):`); for (const p of problems.slice(0, 40)) console.log(`  · ${p}`); process.exit(1); }

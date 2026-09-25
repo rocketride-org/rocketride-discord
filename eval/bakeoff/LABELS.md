@@ -1,131 +1,165 @@
 # Labelling guide — Arm A vs Arm C bake-off
 
-Two files, read together:
-
-| File | What it is |
-|---|---|
-| `labels.jsonl` | 157 rows. The **empty fields are yours**. One JSON object per line; `#` lines are ignored. |
-| `labels-context.md` | The evidence for each row, in the same order. Find the `## <id>` heading, read, fill the matching line. |
+Ground truth for the bake-off. **Review a proposed answer per row and approve or override it** —
+you should not have to fill anything in from scratch.
 
 ```bash
-tsx eval/bakeoff/make-labels.ts --validate     # run this as you go; it catches typos and tells you what's left
+export PATH="/Users/discordbot/.nvm/versions/node/v26.3.0/bin:$PATH"
+tsx eval/bakeoff/make-review.ts      # (re)build the page
+open eval/bakeoff/review.html        # ← do the work here
 ```
 
-Regenerating (`--generate`) is deterministic — the same rows come back — but it **overwrites your
-labels**. Don't run it once you've started.
+The page holds all 142 rows. Each one shows the evidence, the **current answer**, my **proposed
+answer**, and a one-line reason. Accept it, change it, or add a note. Progress is saved in your
+browser as you go, so you can close the tab. When the counter says complete, hit **Export
+labels.jsonl** and drop the file at `eval/bakeoff/labels.jsonl`, replacing the skeleton.
+
+```bash
+tsx eval/bakeoff/make-labels.ts --validate   # check the exported file
+```
+
+Keyboard: `a` accept · `1`/`2`/`3` pass/partial/fail · `s` skip · `j`/`k` move. There's an
+**Accept all remaining** button if you get to a point where you trust the rest.
 
 ---
 
-## Ground rules
+## What you're reviewing
 
-**Nothing is pre-filled with a model's guess.** If the file had shipped with GPT-5.4's or Sonnet's
-labels, you'd anchor to them and every agreement number afterwards would be inflated for whichever
-model resembles them. The one exception is `outcome` on the 12 rows marked `_outcome_forced` — there
-`eval/rules.ts` derives the outcome from the thread's events alone, so it's arithmetic, not a guess.
-Those rows still need a `cause` from you.
+| | Rows | What the proposal is |
+|---|---|---|
+| **Grader** | 60 | An outcome + cause per thread. **33 of the 60 disagree with what production stored** — those are the ones worth your attention. |
+| **Judge** | 82 | pass / partial / fail / skip. 42 real replies + **40 deliberately wrong ones**. |
 
-**Label what you believe, not what you think the bot should have said.** You are the ground truth.
-If you can't decide, put your best guess in and say why in `notes` — a flagged uncertain row is far
-more useful than a confident wrong one, and I can exclude them from the headline numbers.
+Filter by **Low confidence** and **I changed** to spend your time where it matters. Rows tagged
+`outcome fixed by rules.ts` (12 of them) have an outcome that is arithmetic, not a judgement — the
+dropdown is locked and only the cause is yours.
+
+### Where the proposals come from, and the catch
+
+They're mine (Opus), which is deliberately **neither arm** — not Sonnet 5 (Arm A) and not Jev
+(Arm C), so neither side gets a home-field advantage. The **current answer** column is what
+production's GPT-5.4 grader actually stored.
+
+The honest catch: a proposal anchors you, so this gold set is no longer fully independent. The
+report will split every agreement number across rows you **approved** and rows you **changed**, so
+you can see whether the anchor moved the result. If the two subsets disagree sharply, I'll say the
+gold set is compromised rather than quietly report the average.
 
 ---
 
-## Grader rows (60) — `outcome` + `cause`
+## Grader rows — `outcome` then `cause`
 
-### `outcome` — what happened to the thread
+### `outcome`
 
 | Value | Means |
 |---|---|
-| `resolved_unconfirmed` | Ralph answered; nothing contradicted it, nobody confirmed it either |
+| `resolved_unconfirmed` | Ralph answered; nothing contradicted it, nobody confirmed it |
 | `resolved_confirmed` | The asker confirmed it worked (said so, or ✅) |
 | `rejected` | The asker said it didn't work (or ❌) |
 | `overridden` | No escalation, but a team member **corrected or added to** Ralph's answer |
 | `deferred` | Ralph escalated **and** a team member then answered |
 | `deferred_unanswered` | Ralph escalated and nobody came |
 | `dead_end` | Ralph's last word was the canned *"Sorry — I could not process that."* |
-| `no_reply` | Ralph never replied at all |
-| `excluded` | Not a real support question — internal chatter, a test, noise |
-| `reasked` | The same person asked the same thing again later because the first answer didn't land |
+| `no_reply` | Ralph never replied |
+| `excluded` | Not a real support question — greetings, intros, spam, PR announcements |
+| `reasked` | The same person asked again later because the first answer didn't land |
 
-A team member merely saying "thanks" or "on it" is an **ack**, not an override — that stays
-`resolved_unconfirmed`.
+A team member saying "thanks" or "on it" is an **ack**, not an override — that stays
+`resolved_unconfirmed`. A team member posting a bare cross-link ("replied here →") is a pointer,
+also an ack.
 
-### `cause` — why it failed. **Leave blank for `resolved_*` and `excluded`.**
+**Two grouped judgement calls** show up repeatedly, and my proposals assume an answer. Decide once
+and apply it with the group:
+
+- **8 bare greetings** (`hi`, `hii`, `Hello everyone`, `Yes`) — proposed `excluded`.
+- **6 PR announcements** ("PR #2062 needs approval") — proposed `excluded`, since there is no
+  support question for Ralph to resolve. If you'd rather count them, they'd be
+  `resolved_unconfirmed`, and Ralph's success rate rises.
+
+### `cause` — **leave blank for `resolved_*` and `excluded`**
 
 | Value | Means |
 |---|---|
 | `content_gap` | The answer isn't in the docs/KB at all — a **documentation gap** |
 | `retrieval_miss` | It *is* in the KB, but Ralph didn't find it |
-| `bad_answer` | Ralph had the right material in front of it and still got it wrong |
-| `policy_public` | Escalated something public info could have answered (pricing, limits, public roadmap) |
-| `policy_account` | Needs account access or a human decision (refunds, billing, eligibility) |
-| `policy_other` | Partnership, press, internal routing |
+| `bad_answer` | Ralph had the right material and still got it wrong |
+| `policy_public` | Escalated something public info could answer (pricing, limits, status, roadmap) |
+| `policy_account` | Needs account access or a human decision (refunds, billing, promo codes) |
+| `policy_other` | Partnership, press, event logistics |
 | `product_defect` | Root cause is a real product bug |
 | `feature_request` | They want something that doesn't exist yet |
-| `tool_error` | Escalated because a GitHub/HTTP tool call failed |
-| `engine_error` | `dead_end` or `no_reply` — the pipeline broke |
+| `tool_error` | Escalation triggered by a GitHub/HTTP tool failure — **computed, not chosen** |
+| `engine_error` | `dead_end` or `no_reply` — **computed, not chosen** |
 | `unknown` | Genuinely can't tell |
 
-> Production derives `content_gap` / `retrieval_miss` / `bad_answer` from **miniLM retrieval scores**
-> you can't see, not from the LLM. Label what you believe; the report will show cause agreement for
-> those three separately from the causes the LLM actually decides.
+> `content_gap` / `retrieval_miss` / `bad_answer` are decided in production from **miniLM retrieval
+> scores** you can't see. Label what you believe; the report will show agreement on those three
+> separately from the causes the LLM actually picks.
 
 ---
 
-## Judge rows (97) — `verdict`
+## Judge rows — `verdict`
 
-For each row: does **reply** satisfy **golden_answer** for **question**?
+Does **reply** satisfy **golden_answer** for **question**? Judge on substance, not wording.
 
 | Value | Means |
 |---|---|
-| `pass` | Correct, and covers the golden answer's key points |
+| `pass` | Correct, covers the golden's key points |
 | `partial` | Partly right, or missing something that matters |
-| `fail` | Wrong, off-topic, or missing the point entirely |
+| `fail` | Wrong, off-topic, or missing the point |
+| `skip` | **The case is broken** — see below. Not "I'm unsure". |
 
-Judge on **substance, not wording** — a shorter reply that gets there is a `pass`.
+The golden answers come from `qa_pairs` — standalone Q/As the grader drafted from the team's
+messages. That is what production's judge is actually fed (`replay.ts` → `golden_cases.golden_answer`),
+so it's the faithful thing to measure. Raw team messages were the first attempt and turned out to be
+mostly routing chatter ("can you check this?"), which cannot serve as a golden.
 
-**40 of these replies were altered on purpose** (marked `_synthetic`, with `_perturbation` set to
-`swap` = another thread's answer, `truncate` = first sentence only, `corrupt` = a number or
-identifier changed). The perturbation is a **hypothesis, not a label**: a truncated reply can still
-genuinely answer the question, and a corrupted number might be in a part of the reply that doesn't
-matter. **Judge it as you find it.** If you label a synthetic row `pass`, that is a real and useful
-data point, not a mistake.
+### The 17 broken cases
 
-### Why the wrong replies exist
+On 17 rows the drafted golden answers a *different* question than the thread opener — the grader
+built the Q/A from a later turn. Example: the question is "websocket issues it looks like" and the
+golden is about a Google OAuth redirect URL. Those are proposed `skip` and drop out of every metric.
 
-The headline metric is **false-pass rate**: how often a judge waves through a reply you called
-`fail`. A judge that does this silently hides regressions — it is strictly worse than one that is
-merely noisy. A set of only-good replies cannot measure it at all.
+**This is itself a finding.** Roughly a fifth of the drafted Q/As don't match their thread, which
+means the golden set that Phase 5 replay would be seeded from needs a review gate before it's
+trusted. Worth fixing regardless of which arm wins.
+
+### The 40 wrong replies
+
+`swap` (another thread's answer), `truncate` (first sentence only), `corrupt` (a number or
+identifier changed — the review page **highlights the change** so you don't have to hunt for it).
+
+The perturbation is a **hypothesis, not a label**. Two truncations in this set still answer the
+question and are proposed `pass`; one corruption renames a package to `kds-resal`, which reads
+perfectly and is completely wrong. Label what you find.
 
 ---
 
-## How long, and what the numbers will be worth
+## What this buys — the honest version
 
-Roughly **3 hours**: ~2 min per grader row, ~40 s per judge row.
+My proposals come out at **47 fail, 10 pass, 8 partial, 17 skip**. The headline metric's precision
+depends on the number of `fail` rows, so assume roughly 45–50 after your review:
 
-Precision of the headline metric depends on **how many rows you label `fail`**, not on how many rows
-exist. Expect ~40–55 fails (the 40 synthetic ones, minus those you pass, plus genuinely bad real
-replies). That buys:
-
-| Comparison | `fail` rows needed per arm |
+| Comparison | `fail` rows needed |
 |---|---|
-| 5% vs 40% false-pass | 23 |
-| 5% vs 25% | 51 |
-| 5% vs 20% | 77 |
-| 5% vs 15% | 142 |
-| 5% vs 10% | 436 |
+| 5% vs 40% false-pass | 23 ✅ |
+| 5% vs 25% | 51 — marginal |
+| 5% vs 20% | 77 ✗ |
+| 5% vs 15% | 142 ✗ |
+| 5% vs 10% | 436 ✗ |
 
-So this set can prove **"Arm C is much worse"** or **"Arm C is not much worse"**. It cannot resolve a
-5-point difference, and the report will say so rather than declare a winner. If Arm C lands close to
-Arm A, that is the point at which more labels are worth your time — and I'll tell you how many.
+So this set can show **"Arm C is clearly worse"** or **"Arm C is not clearly worse"**. It cannot
+resolve a 5-point gap, and the report will say that instead of picking a winner. With zero observed
+false passes the true rate could still be as high as `3 ÷ n` — at 47 fails, "we saw none" means
+"under 6.4%", not "zero".
 
-Also worth knowing before you start: with zero observed false passes, the true rate could still be
-as high as **3 ÷ n**. At n = 40 fails, "we saw none" means "it's under 7.5%", not "it's zero".
+Time: about **an hour**, most of it on the 33 grader rows where my proposal and production disagree.
 
 ---
 
 ## Privacy
 
-`labels.jsonl` and `labels-context.md` contain real customer questions, team answers and Discord
-user ids, so both are **gitignored**. The generator and this guide are committed; the data is not.
-If you want the ground truth versioned, say so and I'll add an id-stripping pass first.
+`labels.jsonl`, `labels-context.md` and `review.html` are **gitignored** — they carry real customer
+questions, team answers and Discord user ids. The generators and `proposals-*.json` are committed
+(checked: no user ids, emails or channel links). If you want the ground truth versioned, say so and
+I'll add an id-stripping pass first.

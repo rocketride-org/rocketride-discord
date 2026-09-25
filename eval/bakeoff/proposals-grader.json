@@ -1,0 +1,362 @@
+{
+ "g-1531776143009644765": {
+  "outcome": "deferred",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Team supplied the real fix (add Task.control to the team / use a dev-or-prod team). Team-scoped key permissions are not in the KB."
+ },
+ "g-1531746777244635248": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "med",
+  "reason": "User asked about Pipeshift (a hackathon partner); Ralph answered about .pipe files. Team corrected. Event-partner facts are not in the KB."
+ },
+ "g-1536562384359919686": {
+  "outcome": "overridden",
+  "cause": "product_defect",
+  "conf": "high",
+  "reason": "Real Grid Editor cold-open bug; team debugged it and asked for a GitHub issue."
+ },
+ "g-1533898873649500282": {
+  "outcome": "deferred",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Actual cause was the ROCKETRIDE_ env-var prefix convention. Ralph gave generic key advice and never mentioned it."
+ },
+ "g-1543938563501064262": {
+  "outcome": "deferred",
+  "cause": "policy_other",
+  "conf": "med",
+  "reason": "Hackathon submission logistics \u2014 answerable only by event organisers, not by the product docs."
+ },
+ "g-1548066931867656255": {
+  "outcome": "deferred",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Team answered with user-level vs org-level env vars on staging; that setup path is not documented."
+ },
+ "g-1543928667858665472": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with stored 'overridden/product_defect'. Ralph correctly identified the fix commit; the only team message is a cross-link to another thread, which is a pointer (ack), not a correction."
+ },
+ "g-1541029113543008257": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with stored 'resolved_unconfirmed'. Bare 'hi' with a canned greeting back \u2014 no question was asked. GROUP: greeting."
+ },
+ "g-1540190852394254386": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'Hi', canned greeting reply. GROUP: greeting."
+ },
+ "g-1534317730126102590": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "Ralph correctly said no date is published and pointed at the right channels. Nothing contradicted it."
+ },
+ "g-1548972697827016814": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "Substantive, plausible answer on when app review is required. No contradiction."
+ },
+ "g-1533519808023363717": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "User pasted console output; Ralph read it back correctly. Nobody objected."
+ },
+ "g-1542404481663369260": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Ralph emitted a raw 'Thought:' scratchpad and no answer; team supplied a how-to video. Also evidence the reply-sanitize leak is still reaching users."
+ },
+ "g-1540506933298073650": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "A contributor announcing PR #2072 \u2014 no support question for Ralph to resolve. GROUP: pr-announcement (6 threads; decide once)."
+ },
+ "g-1524862616034611240": {
+  "outcome": "overridden",
+  "cause": "bad_answer",
+  "conf": "med",
+  "reason": "DISAGREES with stored cause 'product_defect'. Ralph described a Deploy Pipeline UI flow that does not exist; team said deploying from the IDE is not possible yet. The support failure is the fabricated answer, not the missing feature."
+ },
+ "g-1524118715132674078": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "low",
+  "reason": "'Help me bot' \u2014 team had to explain what the bot is for. Weak case either way; could equally be excluded."
+ },
+ "g-1524118678780510231": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Team literally says 'I am documenting all these things' \u2014 a doc gap confirmed in the thread."
+ },
+ "g-1524116982478274640": {
+  "outcome": "deferred",
+  "cause": "policy_public",
+  "conf": "med",
+  "reason": "'Is cloud down?' \u2014 answered by a public status announcement the team linked. Live status is not something the KB can hold."
+ },
+ "g-1519824898372010044": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "high",
+  "reason": "Accurate answer on sounddevice/PortAudio on Apple Silicon, with the headless caveat. Nobody objected."
+ },
+ "g-1521642383626735747": {
+  "outcome": "deferred",
+  "cause": "policy_other",
+  "conf": "high",
+  "reason": "Hackathon sponsorship outreach \u2014 bizdev, correctly routed to a human."
+ },
+ "g-1533520629335330827": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "Read the debug log correctly (auth never completed). No contradiction."
+ },
+ "g-1526309943446208532": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "high",
+  "reason": "Listed the open roles with working links."
+ },
+ "g-1544758039364771890": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'hii'. GROUP: greeting."
+ },
+ "g-1524927339287285812": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "low",
+  "reason": "Asked for the 3 most recent open issues, Ralph returned 1. Nobody corrected it, so it still scores as a success \u2014 worth noting as a silent quality miss."
+ },
+ "g-1544205582213316698": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "Contributor announcing two PRs. GROUP: pr-announcement."
+ },
+ "g-1544953016942075987": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "'Hello everyone'. GROUP: greeting."
+ },
+ "g-1540137602659778600": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "PR #2062 approval request; team merged it. No question Ralph could resolve. GROUP: pr-announcement."
+ },
+ "g-1526071333103075368": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with stored 'resolved_unconfirmed'. A freelancer advertising for work \u2014 not a support question."
+ },
+ "g-1521178306266009640": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'Hi'. GROUP: greeting."
+ },
+ "g-1521179488732450866": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'Hi'. GROUP: greeting."
+ },
+ "g-1547034035082231879": {
+  "outcome": "deferred",
+  "cause": "policy_account",
+  "conf": "med",
+  "reason": "Ends in a promo-token grant question; team took it to DM. Issuing a code needs account access and a human decision."
+ },
+ "g-1537379430941593711": {
+  "outcome": "deferred",
+  "cause": "product_defect",
+  "conf": "high",
+  "reason": "Real startup bug (onnxruntime pin + missing PyJWT); team confirmed both fixes."
+ },
+ "g-1545225026473566219": {
+  "outcome": "no_reply",
+  "cause": "engine_error",
+  "conf": "high",
+  "reason": "Ralph never replied and nobody stepped in. This is a suppressed/failed reply, not a resolution."
+ },
+ "g-1533954799106654278": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "Correctly distinguished memory_internal / memory_persistent / tool_mem0."
+ },
+ "g-1537381181862055997": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Ralph said --node_path is unsupported; team said it works on server-v3.3.0+ and is listed under 'engine --engine_help'. Ralph asserted the opposite of the truth because the flag is undocumented where it looked."
+ },
+ "g-1541089966572961834": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "low",
+  "reason": "Ralph's setup answer was reasonable; team added a Google Doc as the real reference. Addition, not correction \u2014 borderline."
+ },
+ "g-1530728485406900255": {
+  "outcome": "resolved_confirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with the stored outcome. Ralph's own follow-up says 'Glad to hear you're unblocked and your account was created' \u2014 the asker confirmed it worked."
+ },
+ "g-1521166647375691827": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Opener is the single word 'Yes'. GROUP: greeting."
+ },
+ "g-1543933627673608223": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "low",
+  "reason": "Ralph listed Cloud LLM providers that are not actually registered in the Cloud build; team redirected. Which providers Cloud actually ships is not in the KB."
+ },
+ "g-1527728187730296973": {
+  "outcome": "deferred_unanswered",
+  "cause": "unknown",
+  "conf": "low",
+  "reason": "Ralph answered the question correctly and then escalated anyway; nobody came. The escalation looks unnecessary \u2014 flag if you want an 'escalation was wrong' category."
+ },
+ "g-1542554209290035221": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "PR #2130 announcement. GROUP: pr-announcement."
+ },
+ "g-1548072995006971996": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "med",
+  "reason": "Ralph blamed the components schema; team's advice was to switch provider. Nebius support on Wave is undocumented."
+ },
+ "g-1544005974308687892": {
+  "outcome": "deferred",
+  "cause": "tool_error",
+  "conf": "high",
+  "reason": "CORRECTED: same as above \u2014 the escalation was triggered by a tool failure, so eval/rules.ts fixes the cause to tool_error regardless of what any model says."
+ },
+ "g-1535361419858415697": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with stored 'resolved_unconfirmed'. A student introduction, not a support question."
+ },
+ "g-1538410780670820352": {
+  "outcome": "overridden",
+  "cause": "product_defect",
+  "conf": "high",
+  "reason": "Real laser-sdk pin conflict; team confirmed and asked for a PR."
+ },
+ "g-1533979837885190234": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "med",
+  "reason": "Ralph answered about MCP tool discovery; the actual question was hackathon judging visibility. Team corrected with event facts the KB cannot hold."
+ },
+ "g-1524144527882060038": {
+  "outcome": "deferred",
+  "cause": "tool_error",
+  "conf": "high",
+  "reason": "CORRECTED: cause is forced, not a judgement call. The escalation event carries a tool-failure reason, and decideCause returns tool_error before any LLM signal is consulted."
+ },
+ "g-1521218379632083038": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'Hi'. GROUP: greeting."
+ },
+ "g-1540185325786370189": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "PR #2063 approval request, merged by the team. GROUP: pr-announcement."
+ },
+ "g-1527041409503461376": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "high",
+  "reason": "Team gave a concrete Windows fix (VC++ redist, clean engine re-download) that Ralph had no access to."
+ },
+ "g-1520837458952982689": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "high",
+  "reason": "Accurate product overview."
+ },
+ "g-1538673460274790401": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "Three PRs needing reviewer assignment; team actioned them. GROUP: pr-announcement."
+ },
+ "g-1544027183830270062": {
+  "outcome": "overridden",
+  "cause": "product_defect",
+  "conf": "med",
+  "reason": "DISAGREES with stored cause. Ralph gave generic 'check your connection' advice; the real cause was the staging site being down, which the team confirmed and fixed."
+ },
+ "g-1527725676294176898": {
+  "outcome": "deferred",
+  "cause": "product_defect",
+  "conf": "med",
+  "reason": "DISAGREES with stored cause. Sign-in was genuinely broken; team escalated internally rather than pointing at docs."
+ },
+ "g-1520929319713636453": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "'Can u send all info on the intern skills' \u2014 recruiting question, out of scope; Ralph correctly declined."
+ },
+ "g-1526676261790023842": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "low",
+  "reason": "PR #1485 review request. GROUP: pr-announcement."
+ },
+ "g-1547012835442425959": {
+  "outcome": "overridden",
+  "cause": "content_gap",
+  "conf": "med",
+  "reason": "Ralph described the hiring-applicant promo grant; team said codes are for hackathons and shared on the day. Wrong policy branch, and the right one is not in the KB."
+ },
+ "g-1524713369419124736": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "high",
+  "reason": "DISAGREES with stored 'resolved_unconfirmed'. Unrelated Google Cloud program promo posted in the channel \u2014 spam, not a question."
+ },
+ "g-1527869986541146193": {
+  "outcome": "excluded",
+  "cause": "",
+  "conf": "med",
+  "reason": "Bare 'Hi'. GROUP: greeting."
+ },
+ "g-1524103878721667202": {
+  "outcome": "resolved_unconfirmed",
+  "cause": "",
+  "conf": "med",
+  "reason": "DISAGREES with stored 'overridden'. Ralph said there is no sponsor channel; the team said exactly the same thing. That is an ack, not a correction \u2014 though Ralph did leak a 'Thought:' scratchpad first."
+ }
+}
