@@ -21,3 +21,7 @@ pipelines/.eval/
 .DS_Store
 **/.DS_Store
 Thumbs.db
+
+# eval bake-off: hand labels contain real customer questions + Discord user ids
+eval/bakeoff/labels.jsonl
+eval/bakeoff/labels-context.md
