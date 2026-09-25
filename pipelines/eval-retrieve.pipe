@@ -1,0 +1,59 @@
+{
+  "components": [
+    {
+      "id": "eval_webhook",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook", "name": "Webhook" },
+      "ui": { "position": { "x": 400, "y": 300 }, "nodeType": "default", "formDataValid": true }
+    },
+    {
+      "id": "eval_parse",
+      "provider": "parse",
+      "name": "Parser",
+      "config": { "name": "Parser" },
+      "ui": { "position": { "x": 640, "y": 300 }, "nodeType": "default", "formDataValid": true },
+      "input": [ { "lane": "tags", "from": "eval_webhook" } ]
+    },
+    {
+      "id": "eval_question",
+      "provider": "question",
+      "name": "Question",
+      "config": { "type": "question", "name": "Question" },
+      "ui": { "position": { "x": 880, "y": 300 }, "nodeType": "default", "formDataValid": true },
+      "input": [ { "lane": "text", "from": "eval_parse" } ]
+    },
+    {
+      "id": "eval_embed",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": { "profile": "miniLM", "name": "Transformer" },
+      "ui": { "position": { "x": 1120, "y": 300 }, "nodeType": "default", "formDataValid": true },
+      "input": [ { "lane": "questions", "from": "eval_question" } ]
+    },
+    {
+      "id": "eval_qdrant",
+      "provider": "qdrant",
+      "name": "Qdrant",
+      "config": {
+        "profile": "local",
+        "local": { "collection": "ROCKETRIDE_DOCS_EVAL", "port": 6333, "score": 0.3, "serverName": "qdrant", "host": "127.0.0.1" },
+        "name": "Qdrant",
+        "parameters": { "google": {} }
+      },
+      "ui": { "position": { "x": 1360, "y": 300 }, "nodeType": "default", "formDataValid": true },
+      "input": [ { "lane": "questions", "from": "eval_embed" } ]
+    },
+    {
+      "id": "eval_response",
+      "provider": "response_documents",
+      "name": "Return Documents",
+      "config": { "laneName": "documents", "name": "Return Documents" },
+      "ui": { "position": { "x": 1600, "y": 300 }, "nodeType": "default", "formDataValid": true },
+      "input": [ { "lane": "documents", "from": "eval_qdrant" } ]
+    }
+  ],
+  "project_id": "b2c8f5a1-3d7e-4f92-a1b4-6c9e0d2f5a83",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "version": 1
+}

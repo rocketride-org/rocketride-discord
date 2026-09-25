@@ -1,0 +1,136 @@
+{
+  "components": [
+    {
+      "id": "ingest_webhook",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "ingest_parse",
+      "provider": "parse",
+      "name": "Parser",
+      "config": {
+        "name": "Parser"
+      },
+      "ui": {
+        "position": {
+          "x": 700,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "ingest_webhook"
+        }
+      ]
+    },
+    {
+      "id": "ingest_split",
+      "provider": "preprocessor_langchain",
+      "name": "General Text",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter"
+        },
+        "name": "General Text"
+      },
+      "ui": {
+        "position": {
+          "x": 960,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "ingest_parse"
+        }
+      ]
+    },
+    {
+      "id": "ingest_embed",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "name": "Transformer"
+      },
+      "ui": {
+        "position": {
+          "x": 1220,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "ingest_split"
+        }
+      ]
+    },
+    {
+      "id": "ingest_store",
+      "provider": "qdrant",
+      "name": "Qdrant",
+      "config": {
+        "profile": "local",
+        "local": {
+          "collection": "ROCKETRIDE_DOCS_EVAL",
+          "port": 6333,
+          "score": 0.7,
+          "serverName": "qdrant",
+          "host": "127.0.0.1"
+        },
+        "name": "Qdrant",
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 1480,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "ingest_embed"
+        }
+      ]
+    }
+  ],
+  "project_id": "e7a1c9d4-2b6f-4a83-9c1e-5d8f0a2b3c4d",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
