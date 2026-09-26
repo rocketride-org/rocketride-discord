@@ -9,6 +9,33 @@ Measured 2026-09-26 on real threads from the eval store. Total spend: **$4.72**.
 | **Judge** | **Jev + Sonnet, threshold 0.50** | Same accuracy, same false-pass rate, 15× faster, 94% cheaper |
 | **Grader** | **Stay on Sonnet for now** | The cascade is not clearly better, and the cheap settings cost real accuracy |
 
+## What it costs per month, at your volume
+
+Measured volume: **44 support threads/month** reach the grader. The judge runs off the golden set,
+which is currently **empty** — replay has never run.
+
+| Scenario | Sonnet only | Recommended | Saving |
+|---|---|---|---|
+| **Today** (replay off) | **$0.66** | **$0.66** | **$0.00** |
+| Replay on, 50 golden cases weekly | $1.33 | $0.71 | $0.63/mo |
+| Replay on, 100 golden cases weekly | $2.01 | $0.75 | $1.26/mo |
+
+Today the recommendation changes your bill by nothing. The judge is the only task it touches, and
+the judge does not currently run; the grader stays on Sonnet either way.
+
+**The saving does not scale with support volume.** It comes entirely from the judge, which is driven
+by how many golden cases you replay, not by how many threads you get:
+
+| Support volume | Sonnet only | Recommended | Saving |
+|---|---|---|---|
+| 1x — 44 threads/mo | $1.33 | $0.71 | $0.63/mo |
+| 5x — 220 threads/mo | $3.98 | $3.35 | $0.63/mo |
+| 10x — 440 threads/mo | $7.28 | $6.65 | $0.63/mo |
+
+If support traffic grows, the grader becomes the whole bill and this recommendation does nothing
+about it. Savings that scale with volume would need the grader on the cascade too — which the
+accuracy numbers above do not currently support.
+
 ## Judge — 65 cases, 47 labelled fail
 
 | Option | Accuracy | False passes | $/month | Latency | Escalates |
