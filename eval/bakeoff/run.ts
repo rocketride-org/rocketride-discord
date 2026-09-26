@@ -40,6 +40,13 @@ const denull = (v: string) => (v === 'none' ? null : v);
 // --- case loading ----------------------------------------------------------------------------
 interface JudgeRow { id: string; threadId: string; question: string; golden_answer: string; reply: string; _synthetic: boolean; _perturbation: string | null }
 
+/** The grader threads we hold reference labels for — accuracy needs a reference to score against. */
+function labelledGraderIds(): Set<string> {
+	return new Set(readFileSync('eval/bakeoff/labels.jsonl', 'utf8').split('\n')
+		.map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).map((l) => JSON.parse(l))
+		.filter((r) => r.kind === 'grader').map((r) => r.threadId));
+}
+
 /** Judge cases, minus the ones whose golden answers a different question than the opener. */
 function judgeCases(n?: number): JudgeRow[] {
 	const rows = readFileSync('eval/bakeoff/labels.jsonl', 'utf8').split('\n')
@@ -169,7 +176,14 @@ async function run() {
 	const task = (val('--task') ?? 'judge') as 'judge' | 'grader';
 	const repeats = num('--repeats', 3);
 	const n = val('--n') ? num('--n', 40) : undefined;
-	const cases: (JudgeRow | GraderCase)[] = task === 'judge' ? judgeCases(n) : loadGraderCases({ n });
+	let cases: (JudgeRow | GraderCase)[];
+	if (task === 'judge') cases = judgeCases(n);
+	else {
+		const want = labelledGraderIds();
+		// Default to exactly the threads we can score. --all runs the whole corpus (no accuracy).
+		cases = loadGraderCases({}).filter((c) => has('--all') || want.has(c.threadId));
+		if (n) cases = cases.slice(0, n);
+	}
 	const perCase = task === 'judge' ? 3 : 2;
 	const calls = cases.length * repeats * perCase;
 
@@ -352,4 +366,8 @@ async function main() {
   --run --task judge|grader [--n N] [--repeats 3] --yes
   --disagreements [--threshold 0.80]          build the A-vs-B list for a human`);
 }
-main().catch((e) => { console.error('FATAL', e instanceof Error ? e.message : e); process.exit(1); });
+// Only run the CLI when this file is the entry point — summarise.ts imports composeGrader and
+// decisionOf from here, and importing a module must not execute its command line.
+if (process.argv[1]?.endsWith('run.ts')) {
+	main().catch((e) => { console.error('FATAL', e instanceof Error ? e.message : e); process.exit(1); });
+}
