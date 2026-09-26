@@ -15,7 +15,7 @@ import { bench } from '../bench/config';
 import { loadGraderCases, type GraderCase } from '../bench/tasks';
 import { askJev, topProbability, type ChoiceAnswer, type NoulAnswer } from './jev';
 import {
-	GRADER_QUESTIONS, JUDGE_QUESTION, SONNET, armA_grade, armA_judge, askSonnet,
+	GRADER_QUESTIONS, JUDGE_QUESTION, JUDGE_SCORE_QUESTION, SONNET, armA_grade, armA_judge, askSonnet,
 	type Call, type GraderOut,
 } from './arms';
 import { decideCause, decideOutcome } from '../rules';
@@ -307,7 +307,40 @@ async function calibrate() {
 	console.log(`\nDistributions saved to ${OUT}/calibration-*.json. Pick a threshold, then --run.`);
 }
 
+/**
+ * Re-asks Jev the judge question as a three-level score instead of yes/no. Jev only — Sonnet's
+ * answers are already recorded and do not change with how Jev is phrased, so this is 195 Jev
+ * calls and costs about a third of a cent.
+ */
+async function rescore() {
+	const apiKey = key();
+	const repeats = num('--repeats', 3);
+	const cases = judgeCases(val('--n') ? num('--n', 65) : undefined);
+	console.log(`rescore: ${cases.length} cases × ${repeats} repeats, Jev only (~$${(cases.length * repeats * 0.000017).toFixed(4)})`);
+	const rows: any[] = [];
+	let spend = 0, consecutive = 0;
+	for (let r = 0; r < repeats; r++) {
+		for (const c of cases) {
+			const state = JSON.stringify({ question: c.question, golden_answer: c.golden_answer, reply: c.reply });
+			const j = await askJev(apiKey, state, JUDGE_SCORE_QUESTION);
+			spend += j.usage.costUsd;
+			if (!j.ok) {
+				log(`  ! ${c.id}: ${j.error}`);
+				if (++consecutive >= 3) { console.log('  aborting after 3 consecutive failures'); break; }
+				continue;
+			}
+			consecutive = 0;
+			const a: any = j.answers.quality;
+			rows.push({ id: c.id, repeat: r, score: a?.score ?? null, probabilities: a?.probabilities ?? {}, confidence: a?.confidence ?? null, top: a ? topProbability(a) : null, costUsd: j.usage.costUsd, ms: j.ms });
+		}
+	}
+	mkdirSync(OUT, { recursive: true });
+	writeFileSync(join(OUT, 'rescore-judge.jsonl'), rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
+	log(`done — ${rows.length} answers · $${spend.toFixed(5)} · ${join(OUT, 'rescore-judge.jsonl')}`);
+}
+
 async function main() {
+	if (has('--rescore')) return await rescore();
 	if (has('--calibrate')) return await calibrate();
 	if (has('--smoke')) return await smoke();
 	if (has('--run')) return await run();
@@ -315,6 +348,7 @@ async function main() {
 	console.log(`usage: tsx eval/bakeoff/run.ts
   --smoke                                     2 calls, proves both wire formats work
   --calibrate [--task judge|grader|both]      Jev only (~2 cents): how often would Sonnet be called?
+  --rescore [--repeats 3]                     Jev only: re-ask the judge as a 3-level score
   --run --task judge|grader [--n N] [--repeats 3] --yes
   --disagreements [--threshold 0.80]          build the A-vs-B list for a human`);
 }

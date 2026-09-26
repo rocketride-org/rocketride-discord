@@ -18,11 +18,14 @@ const URL = 'https://openrouter.ai/api/v1/systemone';
 
 export type Question =
 	| { type: 'choice'; instructions: string; criteria: Record<string, string> }
-	| { type: 'noul'; instructions: string };
+	| { type: 'noul'; instructions: string }
+	/** `criteria` is an ARRAY for a score question — its indices become the legend keys 0,1,2… */
+	| { type: 'score'; instructions: string; criteria: string[] };
 
 export interface ChoiceAnswer { type: 'choice'; choice: string; probabilities: Record<string, number>; confidence: number }
 export interface NoulAnswer { type: 'noul'; noul: number }
-export type Answer = ChoiceAnswer | NoulAnswer;
+export interface ScoreAnswer { type: 'score'; score: number; legend: Record<string, string>; probabilities: Record<string, number>; confidence: number }
+export type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer;
 
 export interface JevResult {
 	ok: boolean;
@@ -41,6 +44,13 @@ export function topProbability(a: Answer): number {
 	if (a.type === 'noul') return Math.max(a.noul, 1 - a.noul); // distance from the coin flip
 	const p = Object.values(a.probabilities ?? {});
 	return p.length ? Math.max(...p) : (a.confidence ?? 0);
+}
+
+/** The most likely bucket of a score answer, as its legend key. */
+export function topBucket(a: ScoreAnswer): string | null {
+	const e = Object.entries(a.probabilities ?? {});
+	if (!e.length) return null;
+	return e.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
 }
 
 /** A noul is a yes/no probability; >0.5 means yes. */

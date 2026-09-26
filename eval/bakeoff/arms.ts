@@ -86,6 +86,23 @@ export const GRADER_QUESTIONS: Record<string, Question> = {
 	},
 };
 
+/**
+ * Three-level variant. The yes/no form forced Jev to round borderline replies up to "pass" — it
+ * had no way to say "partially right", and every one of its disagreements with Sonnet leaned
+ * lenient. A score question gives it the middle bucket the rubric actually has.
+ */
+export const JUDGE_SCORE_QUESTION: Record<string, Question> = {
+	quality: {
+		type: 'score',
+		instructions: 'How well does the reply answer the question, measured against the golden answer? Judge on substance, not wording — a shorter reply that gets there still scores 2.',
+		criteria: [
+			'Fail — wrong, off-topic, or missing the point of the golden answer entirely.',
+			'Partial — partly right, or missing a key point that matters.',
+			'Pass — correct, and covers the golden answer\'s key points.',
+		],
+	},
+};
+
 export const JUDGE_QUESTION: Record<string, Question> = {
 	satisfies: {
 		type: 'noul',
