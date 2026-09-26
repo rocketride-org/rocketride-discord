@@ -54,7 +54,7 @@ function judgeCases(n?: number): JudgeRow[] {
 interface JudgeRecord {
 	id: string; repeat: number;
 	jev: { ok: boolean; noul: number | null; top: number | null; call: Call; error?: string };
-	sonnet: { ok: boolean; verdict: string | null; parseFail: boolean; reason: string; call: Call; error?: string };
+	sonnet: { ok: boolean; verdict: string | null; parseFail: boolean; unrepairable: boolean; reason: string; raw: string; call: Call; error?: string };
 	reason: { call: Call };   // priced separately so the sweep can cost REASON policies
 }
 
@@ -79,7 +79,7 @@ async function runJudgeCase(apiKey: string, c: JudgeRow, repeat: number): Promis
 			call: { costUsd: j.usage.costUsd, ms: j.ms, inTokens: j.usage.inTokens, outTokens: j.usage.outTokens },
 			error: j.error,
 		},
-		sonnet: { ok: s.ok, verdict: s.verdict, parseFail: s.parseFail, reason: s.reason ?? '', call: s.call, error: s.error },
+		sonnet: { ok: s.ok, verdict: s.verdict, parseFail: s.parseFail, unrepairable: !!s.unrepairable, reason: s.reason ?? '', raw: s.raw ?? '', call: s.call, error: s.error },
 		reason: { call: r.call },
 	};
 }

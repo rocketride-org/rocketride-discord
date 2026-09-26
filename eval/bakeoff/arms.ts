@@ -10,47 +10,36 @@ import { askJev, noulSaysYes, topProbability, type Answer, type ChoiceAnswer, ty
 import { loadPipePrompt } from '../bench/tasks';
 import { bench } from '../bench/config';
 
-export const SONNET = process.env.BAKEOFF_SONNET_MODEL || 'anthropic/claude-sonnet-5';
-const CHAT = 'https://openrouter.ai/api/v1/chat/completions';
-
-export interface Call { costUsd: number; ms: number; inTokens: number; outTokens: number }
-const zero = (): Call => ({ costUsd: 0, ms: 0, inTokens: 0, outTokens: 0 });
+export { SONNET_ANTHROPIC as SONNET } from './sonnet';
+export type { Call } from './sonnet';
+import { askSonnet as callSonnet, type Call } from './sonnet';
 const add = (a: Call, b: Call): Call => ({
 	costUsd: a.costUsd + b.costUsd, ms: a.ms + b.ms,
 	inTokens: a.inTokens + b.inTokens, outTokens: a.outTokens + b.outTokens,
 });
 
-/** One Sonnet call through OpenRouter. `usage.include` makes OpenRouter return the real cost. */
-export async function askSonnet(apiKey: string, system: string, user: string, maxTokens = 1200): Promise<{ ok: boolean; text: string; call: Call; error?: string }> {
-	const t0 = Date.now();
-	try {
-		const res = await fetch(CHAT, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-			body: JSON.stringify({
-				model: SONNET,
-				max_tokens: maxTokens,
-				usage: { include: true },
-				messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-			}),
-			signal: AbortSignal.timeout(bench.timeoutMs),
-		});
-		const text = await res.text();
-		if (!res.ok) return { ok: false, text: '', call: { ...zero(), ms: Date.now() - t0 }, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
-		const j = JSON.parse(text);
-		const u = j.usage ?? {};
-		return {
-			ok: true,
-			text: String(j.choices?.[0]?.message?.content ?? ''),
-			call: { costUsd: u.cost ?? 0, ms: Date.now() - t0, inTokens: u.prompt_tokens ?? 0, outTokens: u.completion_tokens ?? 0 },
-		};
-	} catch (e) {
-		return { ok: false, text: '', call: { ...zero(), ms: Date.now() - t0 }, error: e instanceof Error ? e.message : String(e) };
-	}
+/** One Sonnet call, via whichever backend has a key. See sonnet.ts. */
+export async function askSonnet(_unusedKey: string, system: string, user: string, maxTokens = 1200) {
+	const r = await callSonnet(system, user, { maxTokens });
+	return { ok: r.ok, text: r.text, call: r.call, error: r.error };
 }
 
 /** Same salvage as production: first {...} block, else the whole string. */
 const parseJson = (s: string): any | null => { try { const m = s.match(/\{[\s\S]*\}/); return JSON.parse(m ? m[0] : s); } catch { return null; } };
+
+/**
+ * A lenient second pass, used ONLY to report how many strict failures were trivially recoverable.
+ * Scoring always uses the strict parser, because that is the one production runs — a reply
+ * production would drop must count as dropped here too.
+ */
+function repairJson(s: string): any | null {
+	const m = s.match(/\{[\s\S]*\}/);
+	if (!m) return null;
+	const fixed = m[0]
+		.replace(/,\s*"\s*\}/g, '"}')   // {"a":"b","}  → {"a":"b"}
+		.replace(/,\s*([}\]])/g, '$1');  // trailing comma before } or ]
+	try { return JSON.parse(fixed); } catch { return null; }
+}
 
 // --- the rubric, stated once and used by both arms ------------------------------------------
 // Wording is lifted from pipelines/eval-grader.pipe so Jev and Sonnet are held to the same
@@ -127,8 +116,12 @@ export interface ArmJudgeResult {
 	ok: boolean;
 	verdict: 'pass' | 'partial' | 'fail' | null;
 	parseFail: boolean;
+	/** True when even a lenient repair could not parse it — i.e. not just a formatting slip. */
+	unrepairable?: boolean;
 	call: Call;
 	reason?: string;
+	/** Raw model text, kept so a parse failure can be diagnosed rather than just counted. */
+	raw?: string;
 	/** Arm C only. */
 	noul?: number;
 	escalated?: boolean;
@@ -139,8 +132,12 @@ export interface ArmJudgeResult {
 export async function armA_grade(apiKey: string, input: string): Promise<ArmGraderResult> {
 	const r = await askSonnet(apiKey, loadPipePrompt(bench.graderPipe), input);
 	if (!r.ok) return { ok: false, signals: null, parseFail: false, call: r.call, error: r.error };
-	const g = parseJson(r.text);
-	if (!g) return { ok: true, signals: null, parseFail: true, call: r.call };
+	const g = parseJson(r.text) ?? null;
+	if (!g) {
+		const rep = repairJson(r.text);
+		if (!rep) return { ok: true, signals: null, parseFail: true, call: r.call };
+		return { ok: true, signals: null, parseFail: true, call: r.call };
+	}
 	return {
 		ok: true, parseFail: false, call: r.call,
 		signals: {
@@ -154,8 +151,11 @@ export async function armA_judge(apiKey: string, payload: { question: string; go
 	const r = await askSonnet(apiKey, loadPipePrompt(bench.judgePipe), JSON.stringify(payload));
 	if (!r.ok) return { ok: false, verdict: null, parseFail: false, call: r.call, error: r.error };
 	const j = parseJson(r.text);
-	if (!j?.verdict) return { ok: true, verdict: null, parseFail: true, call: r.call };
-	return { ok: true, verdict: j.verdict, parseFail: false, call: r.call, reason: j.notes ?? '' };
+	if (!j?.verdict) {
+		const rep = repairJson(r.text);
+		return { ok: true, verdict: null, parseFail: true, unrepairable: !rep?.verdict, call: r.call, raw: r.text.slice(0, 1500), reason: rep?.notes ?? '' };
+	}
+	return { ok: true, verdict: j.verdict, parseFail: false, call: r.call, reason: j.notes ?? '', raw: r.text.slice(0, 1500) };
 }
 
 // --- Arm C --------------------------------------------------------------------------------
