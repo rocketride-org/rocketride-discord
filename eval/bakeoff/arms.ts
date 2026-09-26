@@ -91,6 +91,59 @@ export const GRADER_QUESTIONS: Record<string, Question> = {
  * had no way to say "partially right", and every one of its disagreements with Sonnet leaned
  * lenient. A score question gives it the middle bucket the rubric actually has.
  */
+/**
+ * Grader variant with team_reply_kind as an ORDINAL score rather than an unordered choice.
+ *
+ * none -> ack -> addition -> correction is really a scale of how much the human had to intervene,
+ * and asking it as a flat multiple choice throws that structure away. It is the only one of the
+ * four questions Jev is unsure about: median confidence 0.86 against 1.00 for the other three, and
+ * below 0.80 on 42% of cases. Same shape of mistake as asking the judge a yes/no question, which
+ * cost that arm 5 of its 7 disagreements until it was fixed.
+ */
+export const TEAM_REPLY_LEVELS = ['none', 'ack', 'addition', 'correction'] as const;
+
+export const GRADER_QUESTIONS_V2: Record<string, Question> = {
+	team_reply_kind: {
+		type: 'score',
+		instructions: 'How much did a team member have to step in? Score by how much work the human had to do, from none at all up to replacing what the bot said.',
+		criteria: [
+			'None — no team member replied in the thread at all.',
+			'Acknowledgement only — a team member replied but added no information: thanks, on it, a bare cross-link to another thread, or a question back to the asker.',
+			'Addition — the bot was right as far as it went, and a team member supplied something it had missed.',
+			'Correction — a team member contradicted or replaced what the bot said.',
+		],
+	},
+	user_signal: GRADER_QUESTIONS.user_signal,
+	escalation_category: GRADER_QUESTIONS.escalation_category,
+	llm_cause: GRADER_QUESTIONS.llm_cause,
+};
+
+/**
+ * Grader questions, v3: ask the binary the code reads, and only ask what this thread needs.
+ *
+ * 1. `team_reply_kind`'s only consumer is decideOutcome's `correction || addition -> overridden`.
+ *    ack-vs-none and correction-vs-addition are distinctions the code discards, so probability
+ *    split across a pair that means the same thing was being read as uncertainty. Asking the
+ *    binary directly moved median confidence from 0.89 to 0.99.
+ * 2. escalation_category is only read for a deferred outcome, which requires an escalation event;
+ *    team_reply_kind is only read when a team replied and the thread did NOT escalate. Asking
+ *    either one outside those cases lets its uncertainty escalate a case whose answer is discarded.
+ */
+export function graderQuestionsFor(ev: { type: string }[]): Record<string, Question> {
+	const hasEsc = ev.some((e) => e.type === 'escalation');
+	const hasTeam = ev.some((e) => e.type === 'team_reply' || e.type === 'team_mention');
+	const q: Record<string, Question> = {
+		user_signal: GRADER_QUESTIONS.user_signal,
+		llm_cause: GRADER_QUESTIONS.llm_cause,
+	};
+	if (hasTeam && !hasEsc) q.team_changed = {
+		type: 'noul',
+		instructions: 'Did a team member change what the bot said — either correcting it or adding information it had missed? Answer no if they only acknowledged, thanked, asked the user a question, or posted a bare link to another thread.',
+	};
+	if (hasEsc) q.escalation_category = GRADER_QUESTIONS.escalation_category;
+	return q;
+}
+
 export const JUDGE_SCORE_QUESTION: Record<string, Question> = {
 	quality: {
 		type: 'score',
