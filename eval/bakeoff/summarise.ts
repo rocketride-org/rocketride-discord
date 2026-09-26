@@ -10,6 +10,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadGraderCases } from '../bench/tasks';
 import { composeGrader, decisionOf } from './run';
+import { decideOutcome } from '../rules';
 
 const OUT = 'logs/bakeoff';
 const latest = (task: string) => {
@@ -75,21 +76,36 @@ export function graderTable() {
 	const cases = new Map(loadGraderCases({}).map((c) => [`g-${c.threadId}`, c]));
 	const labelled = recs.filter((r) => prop[r.id]?.outcome);
 
+	// A reference label the schema cannot express is unwinnable for EVERY arm, so scoring against
+	// it measures the schema, not the model. decideOutcome emits `excluded` only from its
+	// pre-checks (team opener, test bot, manipulation) — never from an LLM signal — so every
+	// "this is just a greeting" label is unreachable. Report both, lead with the reachable set.
+	const reachable = new Set<string>();
+	for (const r of recs) {
+		const c = cases.get(r.id); const want = prop[r.id]?.outcome; if (!c || !want) continue;
+		const poss = new Set<string>();
+		for (const t of ['none', 'ack', 'correction', 'addition'] as const)
+			for (const u of ['confirmed', 'rejected', 'neutral'] as const)
+				poss.add(decideOutcome(c.thread, c.events, { team_reply_kind: t, user_signal: u }, { testAllowBotIds: [], testChannelIds: [] }).outcome);
+		if (poss.has(want)) reachable.add(r.id);
+	}
+
 	const score = (v: { outcome: string | null; cause: string | null }, id: string) => {
 		const p = prop[id]; if (!p?.outcome) return null;
 		return { outcome: v.outcome === p.outcome, cause: (v.cause ?? '') === (p.cause ?? '') };
 	};
 
 	const row = (name: string, pick: (r: any, c: any) => { d: any; cost: number; ms: number; escalated: boolean }) => {
-		let o = 0, cz = 0, cost = 0, esc = 0, parseFail = 0; const lat: number[] = [];
+		let o = 0, cz = 0, cost = 0, esc = 0, parseFail = 0, oR = 0; const lat: number[] = [];
 		for (const r of recs) {
 			const c = cases.get(r.id); if (!c) continue;
 			const s = pick(r, c); cost += s.cost; lat.push(s.ms); if (s.escalated) esc++;
 			if (!s.d.outcome) parseFail++;
 			const sc = score(s.d, r.id); if (!sc) continue;
-			if (sc.outcome) o++; if (sc.cause) cz++;
+			if (sc.outcome) { o++; if (reachable.has(r.id)) oR++; }
+			if (sc.cause) cz++;
 		}
-		return { name, outcomeAcc: pct(o, labelled.length), causeAcc: pct(cz, labelled.length),
+		return { name, outcomeAcc: pct(o, labelled.length), outcomeReach: pct(oR, reachable.size), causeAcc: pct(cz, labelled.length),
 			perCall: cost / recs.length, perMonth: (cost / recs.length) * MONTHLY.grader,
 			p50: quant(lat, 0.5), escalates: pct(esc, recs.length), parseFail };
 	};
@@ -101,7 +117,7 @@ export function graderTable() {
 			return { d: decisionOf(c, comp.signals), cost: comp.costUsd, ms: comp.ms, escalated: comp.escalated };
 		}));
 	}
-	return { n: recs.length, labelled: labelled.length, rows };
+	return { n: recs.length, labelled: labelled.length, reachable: reachable.size, rows };
 }
 
 if (process.argv[1]?.endsWith('summarise.ts')) {
@@ -114,8 +130,9 @@ if (process.argv[1]?.endsWith('summarise.ts')) {
 
 	const g = graderTable();
 	if (g) {
-		console.log(`\nGRADER — ${g.n} cases, ${g.labelled} with a reference label\n`);
-		console.log('option                | outcome | cause | $/call   | $/month | p50     | escalates | parse fails');
-		for (const r of g.rows) console.log(`${r.name.padEnd(21)} |   ${String(r.outcomeAcc).padStart(3)}%  |  ${String(r.causeAcc).padStart(3)}% | $${r.perCall.toFixed(5)} | $${r.perMonth.toFixed(2).padStart(5)}  | ${String(r.p50).padStart(5)}ms |    ${String(r.escalates).padStart(3)}%   | ${r.parseFail}`);
+		console.log(`\nGRADER — ${g.n} cases, ${g.labelled} labelled, ${g.reachable} of those winnable by any model\n`);
+		console.log('option                | outcome* | cause | $/call   | $/month | p50     | escalates');
+		for (const r of g.rows) console.log(`${r.name.padEnd(21)} |    ${String(r.outcomeReach).padStart(3)}%  |  ${String(r.causeAcc).padStart(3)}% | $${r.perCall.toFixed(5)} | $${r.perMonth.toFixed(2).padStart(5)}  | ${String(r.p50).padStart(5)}ms |    ${String(r.escalates).padStart(3)}%`);
+		console.log(`\n* on the ${g.reachable} winnable rows. The other ${g.labelled - g.reachable} want "excluded", which the grader schema cannot express — unwinnable for Sonnet too.`);
 	} else console.log('\nGRADER — no run found (still running?)');
 }
