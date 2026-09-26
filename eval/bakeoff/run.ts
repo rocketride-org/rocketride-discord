@@ -236,12 +236,85 @@ function disagreements() {
 	console.log('These are the only rows a human needs to look at.');
 }
 
+/**
+ * Jev-only pass. Answers "how often would Sonnet actually get called?" before a single Sonnet
+ * token is spent — Jev bills $0.042/M in and nothing out, so measuring the whole corpus costs
+ * about two cents. Escalation rate is a property of Jev's confidence on OUR data; it cannot be
+ * guessed from the docs, only measured.
+ */
+async function calibrate() {
+	const apiKey = key();
+	const task = (val('--task') ?? 'both') as 'judge' | 'grader' | 'both';
+	const tasks: ('judge' | 'grader')[] = task === 'both' ? ['judge', 'grader'] : [task];
+	mkdirSync(OUT, { recursive: true });
+
+	for (const t of tasks) {
+		const cases: any[] = t === 'judge' ? judgeCases(val('--n') ? num('--n', 40) : undefined) : loadGraderCases({ n: val('--n') ? num('--n', 60) : undefined });
+		console.log(`\n${t}: asking Jev about ${cases.length} cases (no Sonnet calls at all)`);
+		const rows: any[] = [];
+		let jevSpend = 0, failed = 0, consecutive = 0;
+
+		for (const c of cases) {
+			const state = t === 'judge'
+				? JSON.stringify({ question: c.question, golden_answer: c.golden_answer, reply: c.reply })
+				: c.input;
+			const j = await askJev(apiKey, state, t === 'judge' ? JUDGE_QUESTION : GRADER_QUESTIONS);
+			jevSpend += j.usage.costUsd;
+			if (!j.ok) {
+				failed++;
+				log(`  ! ${c.id ?? c.threadId}: ${j.error}`);
+				// A bad key or a wrong endpoint fails identically on every case — stop rather than
+				// walk the whole corpus printing the same error.
+				if (++consecutive >= 3) { console.log('  aborting after 3 consecutive failures — fix the error above'); break; }
+				continue;
+			}
+			consecutive = 0;
+			const tops: Record<string, number> = {};
+			for (const [k, a] of Object.entries(j.answers)) tops[k] = topProbability(a as any);
+			rows.push({
+				id: c.id ?? `g-${c.threadId}`,
+				tops,
+				// the weakest answer decides: one Sonnet call returns every field, so a single
+				// uncertain field escalates the whole case and costs the same as all four doing so
+				weakest: Math.min(...Object.values(tops)),
+				inTokens: j.usage.inTokens,
+				answers: j.answers,
+			});
+		}
+		if (!rows.length) { console.log('  no usable responses — fix the errors above'); continue; }
+
+		writeFileSync(join(OUT, `calibration-${t}.json`), JSON.stringify(rows, null, 1));
+
+		// Sonnet's price is public; the token count is the one Jev just measured on the same text.
+		const meanIn = rows.reduce((a, r) => a + r.inTokens, 0) / rows.length;
+		const sonnetCall = (meanIn * 2 + 150 * 10) / 1e6;   // $2/M in, $10/M out
+		const jevCall = jevSpend / rows.length;
+		const armA = sonnetCall;
+
+		console.log(`  Jev cost for the whole pass: $${jevSpend.toFixed(5)} (${failed} failed)`);
+		console.log(`  mean input ${Math.round(meanIn)} tokens → a Sonnet call on this task costs ~$${sonnetCall.toFixed(5)}`);
+		console.log(`\n  threshold | escalates | Sonnet calls | $/call Arm C | vs Arm A ($${armA.toFixed(5)})`);
+		console.log('  ----------|-----------|--------------|--------------|----------');
+		for (const th of THRESHOLDS) {
+			const esc = rows.filter((r) => r.weakest < th).length;
+			const rate = esc / rows.length;
+			const cost = jevCall + rate * sonnetCall;
+			const pct = ((cost / armA - 1) * 100);
+			console.log(`     ${th.toFixed(2)}   |   ${(rate * 100).toFixed(0).padStart(3)}%   |  ${String(esc).padStart(3)}/${rows.length}     |  $${cost.toFixed(5)}   | ${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`);
+		}
+		console.log(`\n  (excludes the REASON call — add it with --reason always to see that column too)`);
+	}
+	console.log(`\nDistributions saved to ${OUT}/calibration-*.json. Pick a threshold, then --run.`);
+}
+
 async function main() {
+	if (has('--calibrate')) return await calibrate();
 	if (has('--smoke')) return await smoke();
 	if (has('--run')) return await run();
 	if (has('--disagreements')) return disagreements();
 	console.log(`usage: tsx eval/bakeoff/run.ts
   --smoke                                     2 calls, proves both wire formats work
+  --calibrate [--task judge|grader|both]      Jev only (~2 cents): how often would Sonnet be called?
   --run --task judge|grader [--n N] [--repeats 3] --yes
   --disagreements [--threshold 0.80]          build the A-vs-B list for a human`);
 }
