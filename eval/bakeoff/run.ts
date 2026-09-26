@@ -15,8 +15,8 @@ import { bench } from '../bench/config';
 import { loadGraderCases, type GraderCase } from '../bench/tasks';
 import { askJev, topProbability, type ChoiceAnswer, type NoulAnswer } from './jev';
 import {
-	GRADER_QUESTIONS, JUDGE_QUESTION, JUDGE_SCORE_QUESTION, SONNET, armA_grade, armA_judge, askSonnet,
-	type Call, type GraderOut,
+	GRADER_QUESTIONS, GRADER_QUESTIONS_V2, JUDGE_QUESTION, JUDGE_SCORE_QUESTION, SONNET, TEAM_REPLY_LEVELS,
+	armA_grade, armA_judge, askSonnet, graderQuestionsFor, type Call, type GraderOut,
 } from './arms';
 import { decideCause, decideOutcome } from '../rules';
 
@@ -353,7 +353,83 @@ async function rescore() {
 	log(`done — ${rows.length} answers · $${spend.toFixed(5)} · ${join(OUT, 'rescore-judge.jsonl')}`);
 }
 
+/** Jev only: re-ask the grader with team_reply_kind as an ordinal score. Sonnet is already recorded. */
+async function regrade() {
+	const apiKey = key();
+	const repeats = num('--repeats', 3);
+	const want = labelledGraderIds();
+	const cases = loadGraderCases({}).filter((c) => want.has(c.threadId));
+	console.log(`regrade: ${cases.length} cases × ${repeats} repeats, Jev only (~$${(cases.length * repeats * 0.0002).toFixed(3)})`);
+	const rows: any[] = [];
+	let spend = 0, consecutive = 0;
+	for (let r = 0; r < repeats; r++) {
+		for (const c of cases) {
+			const j = await askJev(apiKey, c.input, GRADER_QUESTIONS_V2);
+			spend += j.usage.costUsd;
+			if (!j.ok) {
+				log(`  ! ${c.threadId}: ${j.error}`);
+				if (++consecutive >= 3) { console.log('  aborting after 3 consecutive failures'); break; }
+				continue;
+			}
+			consecutive = 0;
+			const answers: Record<string, any> = {};
+			for (const [k, a] of Object.entries(j.answers) as any) {
+				const top = topProbability(a);
+				if (a.type === 'score') {
+					// the winning legend key is the ordinal level; map it back to the enum
+					const idx = Number(Object.entries(a.probabilities as Record<string, number>).reduce((x, y) => (y[1] > x[1] ? y : x))[0]);
+					answers[k] = { choice: TEAM_REPLY_LEVELS[idx] ?? null, probabilities: a.probabilities, top };
+				} else {
+					answers[k] = { choice: a.choice, probabilities: a.probabilities ?? {}, top };
+				}
+			}
+			rows.push({ id: `g-${c.threadId}`, repeat: r, answers, costUsd: j.usage.costUsd, ms: j.ms });
+		}
+	}
+	mkdirSync(OUT, { recursive: true });
+	writeFileSync(join(OUT, 'regrade-grader.jsonl'), rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
+	log(`done — ${rows.length} answers · $${spend.toFixed(5)} · ${join(OUT, 'regrade-grader.jsonl')}`);
+}
+
+/** Jev only: grader with the binary team question and per-thread question gating. */
+async function regrade2() {
+	const apiKey = key();
+	const repeats = num('--repeats', 3);
+	const want = labelledGraderIds();
+	const cases = loadGraderCases({}).filter((c) => want.has(c.threadId));
+	console.log(`regrade2: ${cases.length} cases × ${repeats} repeats, Jev only (~$${(cases.length * repeats * 0.0002).toFixed(3)})`);
+	const rows: any[] = [];
+	let spend = 0, consecutive = 0;
+	for (let r = 0; r < repeats; r++) {
+		for (const c of cases) {
+			const qs = graderQuestionsFor(c.events as any);
+			const j = await askJev(apiKey, c.input, qs);
+			spend += j.usage.costUsd;
+			if (!j.ok) {
+				log(`  ! ${c.threadId}: ${j.error}`);
+				if (++consecutive >= 3) { console.log('  aborting after 3 consecutive failures'); break; }
+				continue;
+			}
+			consecutive = 0;
+			const answers: Record<string, any> = {};
+			for (const [k, a] of Object.entries(j.answers) as any) {
+				const top = topProbability(a);
+				answers[k] = a.type === 'noul'
+					// either member of the winning pair gives the same outcome, so pick one
+					? { choice: a.noul > 0.5 ? 'correction' : 'ack', noul: a.noul, top }
+					: { choice: a.choice, probabilities: a.probabilities ?? {}, top };
+			}
+			rows.push({ id: `g-${c.threadId}`, repeat: r, asked: Object.keys(qs), answers, costUsd: j.usage.costUsd, ms: j.ms });
+		}
+	}
+	mkdirSync(OUT, { recursive: true });
+	writeFileSync(join(OUT, 'regrade2-grader.jsonl'), rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
+	log(`done — ${rows.length} answers · $${spend.toFixed(5)} · ${join(OUT, 'regrade2-grader.jsonl')}`);
+}
+
 async function main() {
+	if (has('--regrade2')) return await regrade2();
+	if (has('--regrade')) return await regrade();
 	if (has('--rescore')) return await rescore();
 	if (has('--calibrate')) return await calibrate();
 	if (has('--smoke')) return await smoke();
@@ -363,6 +439,8 @@ async function main() {
   --smoke                                     2 calls, proves both wire formats work
   --calibrate [--task judge|grader|both]      Jev only (~2 cents): how often would Sonnet be called?
   --rescore [--repeats 3]                     Jev only: re-ask the judge as a 3-level score
+  --regrade [--repeats 3]                     Jev only: re-ask the grader with an ordinal team_reply_kind
+  --regrade2 [--repeats 3]                    Jev only: binary team question + per-thread gating
   --run --task judge|grader [--n N] [--repeats 3] --yes
   --disagreements [--threshold 0.80]          build the A-vs-B list for a human`);
 }
