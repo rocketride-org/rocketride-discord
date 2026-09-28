@@ -29,3 +29,44 @@ test('store: synthetic event with stable id dedupes; null message_id allows many
 	assert.equal(s.countEvents(), 1);
 	s.close();
 });
+
+// Regression: "Teach Ralph the answer" on a thread the grader never drafted for (nobody from the
+// team had answered) used to skip the KB write silently — the answer reached nothing.
+test('store: a hand-written Q/A with no grader draft still becomes ingestable', () => {
+	const s = new Store(':memory:');
+	s.upsertThread(thread('t1'));
+	assert.equal(s.getLatestQaDraft('t1'), undefined, 'no draft to start');
+
+	const id = s.insertQaDraft('t1', 'How do I install it?', 'Run npm install rocketride.');
+	assert.ok(id > 0, 'insertQaDraft returns the new row id');
+	s.approveQa(id, 'reviewer', 'How do I install it?', 'Run npm install rocketride.');
+
+	const pending = s.getApprovedUningested();
+	assert.equal(pending.length, 1);
+	assert.equal(pending[0].answer, 'Run npm install rocketride.');
+
+	// Once ingested it is not offered again.
+	s.markIngested(id);
+	assert.equal(s.getApprovedUningested().length, 0);
+	s.close();
+});
+
+// Re-teaching the same thread must add a NEW pair, not edit an already-ingested row that
+// getApprovedUningested() would never return again.
+test('store: an already-ingested pair is detectable so re-teaching creates a new one', () => {
+	const s = new Store(':memory:');
+	s.upsertThread(thread('t1'));
+	const first = s.insertQaDraft('t1', 'q1', 'a1');
+	s.approveQa(first, 'reviewer', 'q1', 'a1');
+	s.markIngested(first);
+
+	const latest = s.getLatestQaDraft('t1');
+	assert.ok(latest.ingested_at, 'latest pair is flagged as ingested');
+
+	const second = s.insertQaDraft('t1', 'q1', 'a1 corrected');
+	s.approveQa(second, 'reviewer', 'q1', 'a1 corrected');
+	const pending = s.getApprovedUningested();
+	assert.equal(pending.length, 1);
+	assert.equal(pending[0].answer, 'a1 corrected');
+	s.close();
+});

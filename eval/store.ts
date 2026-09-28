@@ -106,8 +106,10 @@ export class Store {
 	saveExcluded(threadId: string, reason: string): void {
 		this.db.prepare(`UPDATE threads SET outcome='excluded', outcome_source='auto', excluded_reason=?, status='graded' WHERE thread_id=?`).run(reason, threadId);
 	}
-	insertQaDraft(threadId: string, question: string, answer: string): void {
-		this.db.prepare(`INSERT INTO qa_pairs (thread_id, question, answer, status) VALUES (?,?,?,'draft')`).run(threadId, clip(question) ?? '', clip(answer) ?? '');
+	/** Returns the new row id so the review flow can approve a pair it just created. */
+	insertQaDraft(threadId: string, question: string, answer: string): number {
+		const info = this.db.prepare(`INSERT INTO qa_pairs (thread_id, question, answer, status) VALUES (?,?,?,'draft')`).run(threadId, clip(question) ?? '', clip(answer) ?? '');
+		return Number(info.lastInsertRowid);
 	}
 
 	// ---- Phase 4 review ----

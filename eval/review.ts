@@ -194,11 +194,16 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 
 	// 'qa' opens a modal — a modal MUST be the first response, so never defer before it.
 	if (interaction.isButton() && action === 'qa') {
+		// The grader only drafts a Q/A when a TEAM MEMBER supplied the answer (it must never invent
+		// one). With no draft the answer box is correctly blank — but the question is always known,
+		// so fall back to the thread's own question rather than showing two empty boxes.
 		const draft = store.getLatestQaDraft(threadId) ?? {};
+		const thread = store.getThreadFull(threadId);
+		const question = draft.question ?? thread?.question ?? '';
 		const modal = new ModalBuilder().setCustomId(`eval:qasave:${threadId}`).setTitle('Teach Ralph the answer')
 			.addComponents(
-				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('q').setLabel('Question (what users ask)').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.question ?? '').slice(0, 4000))),
-				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('a').setLabel('Answer — Ralph reuses this on similar Qs').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.answer ?? '').slice(0, 4000))),
+				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('q').setLabel('Question (what users ask)').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue(String(question).slice(0, 4000))),
+				new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('a').setLabel('Answer — Ralph reuses this on similar Qs').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setValue((draft.answer ?? '').slice(0, 4000)).setPlaceholder('Write the answer Ralph should have given.')),
 			);
 		await interaction.showModal(modal); return;
 	}
@@ -206,19 +211,23 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 	// Modal submit → approve the Q/A + seed a golden case (and it becomes ingestable into the KB).
 	if (interaction.isModalSubmit() && action === 'qasave') {
 		const q = interaction.fields.getTextInputValue('q'); const a = interaction.fields.getTextInputValue('a');
-		const draft = store.getLatestQaDraft(threadId);
-		if (draft) store.approveQa(draft.id, by, q, a);
+		// Always end up with an approved qa_pair to ingest. Previously a thread with no grader
+		// draft (nobody from the team had answered) silently skipped the KB write entirely, so a
+		// hand-written answer never reached Ralph. Create the pair when there isn't one — and also
+		// when the latest one was already ingested, so re-teaching adds a new entry instead of
+		// editing a row ingestApproved() will never pick up again.
+		let draft = store.getLatestQaDraft(threadId);
+		if (!draft || draft.ingested_at) draft = { id: store.insertQaDraft(threadId, q, a) };
+		store.approveQa(draft.id, by, q, a);
 		const t = store.getThreadFull(threadId);
 		const expected = (t?.cause === 'policy_account' || t?.cause === 'policy_other') ? 'escalate' : 'answer';
 		store.createGoldenCase({ question: q, expected, golden_answer: expected === 'answer' ? a : null, source: 'review', thread_id: threadId });
 		await interaction.reply({ content: `Q/A approved (golden: ${expected}). Adding to Ralph's KB…`, ephemeral: true });
 		// Push the approved answer straight into Ralph's KB (ROCKETRIDE_DOCS) from Discord — no CLI step.
 		try {
-			const n = draft ? await ingestApproved(store, { log: console.log }) : 0;
+			const n = await ingestApproved(store, { log: console.log });
 			await interaction.editReply(
-				draft
-					? `✅ Q/A approved (golden: ${expected}) and **added to Ralph's KB**${n > 1 ? ` (+${n - 1} other pending)` : ''}. He'll use it on the next matching question.`
-					: `Q/A approved (golden: ${expected}). No grader draft on this thread, so it seeded a regression case but wasn't auto-ingested — run \`tsx eval/main.ts --ingest-approved\` if you want it in the KB.`,
+				`✅ Q/A approved (golden: ${expected}) and **added to Ralph's KB**${n > 1 ? ` (+${n - 1} other pending)` : ''}. He'll use it on the next matching question.`,
 			);
 		} catch (e) {
 			await interaction.editReply(`Q/A approved (golden: ${expected}), but the KB write failed: ${e instanceof Error ? e.message : e}. Retry with \`tsx eval/main.ts --ingest-approved\`.`);
