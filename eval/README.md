@@ -22,12 +22,12 @@ nothing writes to production (the KB, the public FAQ) without a human approval s
  [1] CAPTURE ─────────► logs/ralph-eval.sqlite
       │   every question · Ralph reply (+classification) · team reply · no-reply · ✅/❌ reaction
       ▼
- [2] GRADE  (nightly 01:00)      eval-grader.pipe  (OpenAI GPT-5.4)
+ [2] GRADE  (nightly 01:00)      eval-grader.pipe  (Claude Sonnet 4.6)
       │   labels cause + outcome, flags documentation gaps, drafts a better answer
       ▼
  [3] REVIEW  #ralph-eval         review cards + weekly scorecard  (team-gated buttons)
       │   a human confirms/corrects the grade, and can approve a canonical Q/A
-      ├──────────────► [4] REPLAY (weekly, gated)   eval-judge.pipe (GPT-5.4)
+      ├──────────────► [4] REPLAY (weekly, gated)   eval-judge.pipe (Sonnet 4.6)
       │                    re-runs the golden questions through isolated pipe copies,
       │                    reports pass-rate + regressions (never touches prod pipes)
       └──────────────► [5] KB WRITEBACK             rag.pipe → qdrant ROCKETRIDE_DOCS
@@ -165,7 +165,7 @@ state, so the durable record is on the card rather than in a note only one perso
 | `EVAL_DB_PATH` | SQLite path (default `logs/ralph-eval.sqlite`). |
 | `EVAL_TARGET` / `EVAL_WINDOW_DAYS` / `EVAL_TZ` / `EVAL_GRADE_HOUR` | Tunables (defaults 0.60 / 28 / America/Los_Angeles / 1). |
 | `EVAL_*_PIPE`, `EVAL_REPLAY_PROJECT_IDS` | Pipe paths + isolated replay project ids. |
-| `ROCKETRIDE_OPENAI_KEY` | Used by the grader/judge pipes (via `${...}` substitution). |
+| `ROCKETRIDE_ANTHROPIC_KEY` | Used by the grader/judge pipes (via `${...}` substitution). **Must** carry the `ROCKETRIDE_` prefix — the engine substitutes nothing else, so a bare `ANTHROPIC_API_KEY` silently fails to resolve. |
 | shared: `SUPPORT_CHANNEL_ID`, `SUPPORT_MENTION_CHANNEL_ID`, `SUPPORT_ESCALATION_ROLE_ID` | Channels + team role. |
 
 > `.env` and `data/slack-experts.json` are **gitignored** (secrets / real member ids). The eval
@@ -177,7 +177,7 @@ state, so the durable record is on the card rather than in a note only one perso
 
 | Job | Model |
 |---|---|
-| Grader + Judge (`eval-grader.pipe`, `eval-judge.pipe`) | OpenAI **GPT-5.4** (`openai-5-4`) |
+| Grader + Judge (`eval-grader.pipe`, `eval-judge.pipe`) | Anthropic **Claude Sonnet 4.6** (`llm_anthropic`, profile `claude-sonnet-4-6`) — deliberately *not* OpenAI, so the eval doesn't grade Ralph with Ralph's own model family |
 | Retrieval / q-a similarity (`eval-retrieve.pipe`) | **miniLM** embeddings (same as Ralph's RAG; matches the 384-dim `ROCKETRIDE_DOCS` collection) |
 | Ralph's own answers (`rocket-ralph.pipe`) | `gpt-4-1` |
 
