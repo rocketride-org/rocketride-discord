@@ -119,6 +119,12 @@ export class Store {
 			ORDER BY t.last_activity_at DESC
 		`).all();
 	}
+	/** Threads that already have a card posted — used to re-render existing cards in place. */
+	getCardedThreads(limit?: number): any[] {
+		const sql = `SELECT t.*, c.label AS cluster_label FROM threads t LEFT JOIN clusters c ON c.id = t.cluster_id
+			WHERE t.review_message_id IS NOT NULL ORDER BY t.last_activity_at DESC${limit ? ' LIMIT ' + Number(limit) : ''}`;
+		return this.db.prepare(sql).all();
+	}
 	getThreadFull(threadId: string): any {
 		return this.db.prepare('SELECT t.*, c.label AS cluster_label FROM threads t LEFT JOIN clusters c ON c.id = t.cluster_id WHERE t.thread_id = ?').get(threadId);
 	}

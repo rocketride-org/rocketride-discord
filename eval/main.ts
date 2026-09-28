@@ -10,7 +10,7 @@ import { config } from './config';
 import { Store } from './store';
 import { backfill } from './backfill';
 import { gradeOnce } from './grader';
-import { postWeeklySummary, enqueueReviewCards, handleInteraction } from './review';
+import { postWeeklySummary, enqueueReviewCards, refreshReviewCards, handleInteraction } from './review';
 import { replay } from './replay';
 import { ingestApproved } from './ingest';
 import { writeFileSync } from 'node:fs';
@@ -185,12 +185,13 @@ async function main() {
 	if (has('--report')) return void runReport();
 	if (has('--summary-once')) return void (await withClient((c) => postWeeklySummary(c, new Store(config.dbPath), log)));
 	if (has('--review-once')) return void (await withClient((c) => enqueueReviewCards(c, new Store(config.dbPath), log)));
+	if (has('--refresh-cards')) return void (await withClient((c) => refreshReviewCards(c, new Store(config.dbPath), log, { limit: val('--limit') ? Number(val('--limit')) : undefined })));
 	if (has('--replay')) { const s = new Store(config.dbPath); await replay(s, { limit: val('--limit') ? Number(val('--limit')) : undefined, log }); s.close(); return; }
 	if (has('--ingest-approved')) { const s = new Store(config.dbPath); await ingestApproved(s, { log }); s.close(); return; }
 	if (has('--golden-from-thread')) return void goldenFromThread();
 	if (has('--golden-add')) return void goldenAdd();
 	if (has('--export-golden')) return void exportGolden();
 	if (has('--serve')) { await runServe(); return new Promise<void>(() => {}); } // stay online
-	console.log('usage: tsx eval/main.ts --backfill | --grade-once [--limit N] | --report [--window 28|all] |\n  --summary-once | --review-once | --replay [--limit N] | --ingest-approved |\n  --golden-from-thread <id> --expect escalate|answer | --golden-add --question .. --expect .. [--answer ..] | --export-golden | --serve');
+	console.log('usage: tsx eval/main.ts --backfill | --grade-once [--limit N] | --report [--window 28|all] |\n  --summary-once | --review-once | --refresh-cards [--limit N] | --replay [--limit N] | --ingest-approved |\n  --golden-from-thread <id> --expect escalate|answer | --golden-add --question .. --expect .. [--answer ..] | --export-golden | --serve');
 }
 main().then((v) => { if (v !== undefined || !has('--serve')) process.exit(0); }).catch((e) => { console.error('FATAL', e instanceof Error ? e.stack : e); process.exit(1); });

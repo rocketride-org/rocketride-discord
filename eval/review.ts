@@ -155,6 +155,36 @@ export async function enqueueReviewCards(client: Client, store: Store, log: (...
 	}
 }
 
+/**
+ * Re-render already-posted cards in place (message.edit) so old cards pick up the current
+ * layout. Edits don't re-notify the channel and can't duplicate a card. Messages that were
+ * deleted are reported and skipped — their review_message_id is left alone so nothing
+ * silently re-posts later.
+ */
+export async function refreshReviewCards(
+	client: Client, store: Store, log: (...a: unknown[]) => void, opts: { limit?: number; delayMs?: number } = {},
+): Promise<{ updated: number; missing: number; failed: number }> {
+	const ch = (await client.channels.fetch(config.reviewChannelId)) as TextChannel;
+	const rows = store.getCardedThreads(opts.limit);
+	const delay = opts.delayMs ?? 250;
+	log(`refreshing ${rows.length} posted card(s) in #${ch.name}`);
+	let updated = 0, missing = 0, failed = 0;
+	for (const t of rows) {
+		try {
+			const msg = await ch.messages.fetch(t.review_message_id);
+			await msg.edit(card(t, ch.guildId));
+			updated++;
+		} catch (e: any) {
+			// 10008 = Unknown Message (deleted by hand)
+			if (e?.code === 10008) { missing++; log(`  missing (deleted): ${t.thread_id}`); }
+			else { failed++; log(`  failed ${t.thread_id}: ${e instanceof Error ? e.message : e}`); }
+		}
+		if (delay) await new Promise((r) => setTimeout(r, delay));
+	}
+	log(`refresh done: ${updated} updated, ${missing} missing, ${failed} failed`);
+	return { updated, missing, failed };
+}
+
 // ---------- interactions ----------
 export async function handleInteraction(interaction: Interaction, store: Store): Promise<void> {
 	if (!('customId' in interaction) || !(interaction as any).customId?.startsWith('eval:')) return;
