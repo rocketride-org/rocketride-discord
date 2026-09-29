@@ -5,7 +5,7 @@
 	"main": "showcase.js",
 	"scripts": {
 		"start": "node showcase.js",
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "tsx --test \"tests/**/*.test.ts\""
 	},
 	"author": "",
 	"license": "ISC",
