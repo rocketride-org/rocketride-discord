@@ -60,7 +60,7 @@ nothing writes to production (the KB, the public FAQ) without a human approval s
 
 ## Running it
 
-The **`eval` bot** is `tsx eval/main.ts --serve`, registered in `start-bots.sh`:
+The **`eval` bot** is `./node_modules/.bin/tsx eval/main.ts --serve`, registered in `start-bots.sh`:
 
 ```bash
 ./start-bots.sh eval        # start   (./stop-bots.sh eval / ./status-bots.sh eval)
@@ -69,18 +69,25 @@ The **`eval` bot** is `tsx eval/main.ts --serve`, registered in `start-bots.sh`:
 `--serve` stays online and: handles review-card clicks, **grades nightly at 01:00**, and posts the
 **weekly scorecard Mon 09:00** (`EVAL_TZ`, default `America/Los_Angeles`).
 
-One-off commands (run with the nvm node on `PATH` — see `start-bots.sh`):
+One-off commands. nvm's node is not on `PATH` in a non-login shell, and `tsx` is **only** installed
+locally (`node_modules/.bin/tsx`) — there is no global `tsx`, so both parts of this prefix matter:
 
 ```bash
-tsx eval/main.ts --report [--window 28|all]   # current numbers on demand
-tsx eval/main.ts --grade-once [--limit N]     # grade ungraded threads now
-tsx eval/main.ts --summary-once               # post the weekly scorecard now
-tsx eval/main.ts --review-once                # post pending review cards now
-tsx eval/main.ts --replay [--limit N]         # run the golden set (gated)
-tsx eval/main.ts --ingest-approved            # push approved Q/A into the KB
-tsx eval/main.ts --backfill                   # rebuild history (baseline)
+export PATH="/Users/discordbot/.nvm/versions/node/v26.3.0/bin:$PATH"   # same line start-bots.sh uses
+T=./node_modules/.bin/tsx
+
+$T eval/main.ts --report [--window 28|all]     # current numbers on demand
+$T eval/main.ts --grade-once [--limit N]       # grade ungraded threads now
+$T eval/main.ts --summary-once                 # post the weekly scorecard now
+$T eval/main.ts --review-once                  # post pending review cards now
+$T eval/main.ts --refresh-cards [--limit N]    # re-render posted cards in place
+$T eval/main.ts --replay [--limit N]           # run the golden set (gated)
+$T eval/main.ts --ingest-approved              # push approved Q/A into the KB
+$T eval/main.ts --backfill                     # rebuild history (baseline)
 # golden set: --golden-from-thread <id> --expect escalate|answer | --golden-add … | --export-golden
 ```
+
+`npx tsx eval/main.ts …` works too, once node is on `PATH`.
 
 ---
 
@@ -120,6 +127,10 @@ and a one-line prompt so the reviewer knows the ask before clicking:
 - 🔴 **Counted as a miss** (with the reason) — confirm it, flip it, or teach the fix.
 - ✅ **Counted as resolved** / 🚫 **Excluded** — after a decision; can be flipped back.
 
+Once someone teaches an answer, the card carries a **📚 Answer taught** field naming who taught it,
+when, and whether it reached the KB — so a taught thread no longer looks untouched, and a pair that
+was approved but never ingested is visible instead of silent.
+
 The controls are worded as plain outcomes (no enum jargon), and the **layout is always
 `[agree/keep] · [flip] · [exclude]`**:
 
@@ -130,13 +141,13 @@ The controls are worded as plain outcomes (no enum jargon), and the **layout is 
 | 👍 **Yes, a miss** | Confirms the graded miss, **keeping** its specific reason. |
 | ✅ **Actually resolved** | Flips a graded miss to a **success**. |
 | 🚫 **Not a real question** | **Excludes** it from the metric (noise/internal). |
-| 📚 **Teach Ralph the answer** | Modal (question + answer). On submit: approves the Q/A, seeds a **golden regression case**, and **ingests it straight into Ralph's KB** (`ROCKETRIDE_DOCS`) — no CLI step. |
+| 📚 **Teach Ralph the answer** | Modal (question + answer). On submit: approves the Q/A, seeds a **golden regression case**, **ingests it straight into Ralph's KB** (`ROCKETRIDE_DOCS`) — no CLI step — stamps you as the reviewer, and re-renders the card with a **📚 Answer taught** field. Outcome and reason are left as they were: teaching the fix is not a verdict on the miss. |
 | 🐛 **File a GitHub issue** | Opens a pre-filled *new issue* page (a link — it does **not** auto-create; the bot is read-only on GitHub). |
 | **reason ▾** (dropdown) | Sets/corrects why Ralph missed, in plain language (Doc gap, Retrieval miss, Bad answer, Policy…). |
 
 **Every click replies with a short ephemeral note** (visible only to the clicker) stating the effect —
 e.g. *"✅ Marked resolved — now counts as a success"* — and the card itself refreshes to the new
-state. Clicks acknowledge instantly (deferred) so they never hit Discord's 3-second timeout — the
+state, so the durable record is on the card rather than in a note only one person sees. Clicks acknowledge instantly (deferred) so they never hit Discord's 3-second timeout — the
 `eval` bot must be running for them to respond.
 
 ---

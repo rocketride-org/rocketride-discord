@@ -70,3 +70,35 @@ test('store: an already-ingested pair is detectable so re-teaching creates a new
 	assert.equal(pending[0].answer, 'a1 corrected');
 	s.close();
 });
+
+// The review card shows who taught Ralph an answer and whether it reached the KB, so every query
+// that feeds a card has to carry the latest APPROVED pair. A draft must not light it up, and
+// re-teaching has to move the card onto the newer pair.
+test('store: card queries expose the latest approved Q/A, not drafts', () => {
+	const s = new Store(':memory:');
+	s.upsertThread(thread('t1'));
+	s.saveGrade('t1', { outcome: 'rejected', cause: 'content_gap', q_top_score: 0.5, a_top_score: null, grader_json: '{}', cluster_id: null });
+
+	const first = s.insertQaDraft('t1', 'q', 'a');
+	assert.equal(s.getThreadFull('t1').qa_approved_by, null, 'a draft is not a taught answer');
+	assert.equal(s.getReviewQueue()[0].qa_approved_by, null, 'and not on a queued card either');
+
+	s.approveQa(first, 'josh', 'q', 'a');
+	assert.equal(s.getThreadFull('t1').qa_approved_by, 'josh');
+	assert.equal(s.getThreadFull('t1').qa_ingested_at, null, 'approved, not yet in the KB');
+
+	s.markIngested(first);
+	assert.ok(s.getThreadFull('t1').qa_ingested_at, 'reaching the KB is visible on the card');
+
+	// Re-teaching adds a pair rather than editing the ingested one, so the card follows the new one.
+	const second = s.insertQaDraft('t1', 'q', 'a corrected');
+	s.approveQa(second, 'mith', 'q', 'a corrected');
+	const row = s.getThreadFull('t1');
+	assert.equal(row.qa_approved_by, 'mith');
+	assert.equal(row.qa_ingested_at, null, 'the newer pair has not been ingested yet');
+
+	// getCardedThreads() renders already-posted cards, so it needs the same columns.
+	s.setReviewMessageId('t1', 'm1');
+	assert.equal(s.getCardedThreads()[0].qa_approved_by, 'mith');
+	s.close();
+});

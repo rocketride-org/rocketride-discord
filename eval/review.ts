@@ -9,7 +9,7 @@ import {
 import { config } from './config';
 import { wilson, roundInterval, isFailure, type Outcome } from './rules';
 import type { Store } from './store';
-import { ingestApproved } from './ingest';
+import { ingestApproved, type IngestedPair } from './ingest';
 
 const CAUSES = ['tool_error', 'engine_error', 'policy_public', 'policy_account', 'policy_other', 'product_defect', 'feature_request', 'content_gap', 'bad_answer', 'retrieval_miss', 'unknown'];
 const FAILS = ['deferred', 'deferred_unanswered', 'overridden', 'dead_end', 'no_reply', 'rejected', 'reasked'];
@@ -90,7 +90,7 @@ export async function postWeeklySummary(client: Client, store: Store, log: (...a
 }
 
 // ---------- review cards ----------
-function card(t: any, guildId: string): { embeds: EmbedBuilder[]; components: any[] } {
+function card(t: any, guildId: string, opts: { kbPending?: boolean } = {}): { embeds: EmbedBuilder[]; components: any[] } {
 	const g = parse(t.grader_json);
 	const link = `https://discord.com/channels/${guildId}/${t.thread_id}`;
 	const ct = causeText(t.cause);
@@ -117,7 +117,40 @@ function card(t: any, guildId: string): { embeds: EmbedBuilder[]; components: an
 			{ name: 'q/a match', value: `${(t.q_top_score ?? 0).toFixed(2)} / ${t.a_top_score == null ? '—' : t.a_top_score.toFixed(2)}`, inline: true },
 			{ name: 'Why (grader)', value: (g.summary ?? '—').slice(0, 300) },
 		);
-	if (t.reviewed_by) embed.setFooter({ text: `reviewed by ${t.reviewed_by}` });
+	// A taught answer is the one review action that changes what Ralph says next, so it belongs on
+	// the card: the ephemeral confirmation is seen once, by whoever clicked, and by nobody else.
+	// The KB line is spelled out because ingest can embed the doc and still fail before marking it,
+	// which leaves the pair looking un-ingested when it is already live.
+	if (t.qa_approved_by) {
+		// Three states, not two: the KB write takes ~2 minutes (the ingest status poll runs its full
+		// 60×2s before giving up), so an un-ingested pair during that window is in progress, not
+		// broken. Only a pair nobody is currently ingesting earns the warning.
+		const kb = opts.kbPending
+			? '⏳ adding it to Ralph’s KB…'
+			: t.qa_ingested_at
+			? "in Ralph's KB."
+			: '⚠️ not marked as reaching the KB. Run `npx tsx eval/main.ts --ingest-approved`.';
+		embed.addFields({ name: '📚 Answer taught', value: `by **${t.qa_approved_by}** — ${kb}` });
+	}
+	// Confirming the grader's verdict changes nothing else on the card — same title, same reason — so
+	// without this line the click looks like it did nothing. Deliberately carries no timestamp: the
+	// review time is in the store if it is ever needed, and on the card it was just noise.
+	if (t.reviewed_by) {
+		// Say what was clicked AND what it did to the number. "verdict set by hand" was true but left
+		// a reviewer asking which verdict — and the effect on the success rate is the whole point of
+		// the click. The leading emoji is the one on the button that was pressed, so the card maps
+		// back to the control. Same sentences as the ephemeral notes below, made durable.
+		const how = t.outcome_source === 'review'
+			? (excluded ? '🚫 excluded it — **dropped from the metric**'
+				: success ? '✅ marked this **resolved** — counts as a success'
+				: '❌ marked this a **miss** — counts against the success rate')
+			: t.cause_source === 'review' && t.cause !== g._auto_cause
+			// A confirm now also stamps cause_source='review' (see the confirm branch), so the flag
+			// alone no longer distinguishes the two. Differing from the grader's own cause does.
+			? `▾ set the reason to **${ct ?? '—'}** — the verdict itself is unchanged`
+			: "👍 confirmed the grader's verdict — nothing was changed";
+		embed.addFields({ name: '✔ Reviewed', value: `**${t.reviewed_by}** ${how}` });
+	}
 
 	const btn = (id: string, label: string, emoji: string, style: ButtonStyle) =>
 		new ButtonBuilder().setCustomId(`eval:${id}:${t.thread_id}`).setLabel(label).setEmoji(emoji).setStyle(style);
@@ -185,6 +218,27 @@ export async function refreshReviewCards(
 	return { updated, missing, failed };
 }
 
+/**
+ * Refresh specific cards by their stored message id. An ingest run writes EVERY pending pair, so it
+ * routinely settles cards belonging to other threads than the click that triggered it; without this
+ * those cards sit on "adding it to Ralph's KB…" forever, because the handler that owned them has
+ * already finished. Looks the message up in the channel rather than using interaction.message, so
+ * it works for a card this interaction was never attached to.
+ */
+export async function refreshCardsFor(client: Client, store: Store, threadIds: (string | null | undefined)[]): Promise<void> {
+	const ids = [...new Set(threadIds.filter((x): x is string => !!x))];
+	if (!ids.length) return;
+	let ch: TextChannel;
+	try { ch = (await client.channels.fetch(config.reviewChannelId)) as TextChannel; }
+	catch (e) { console.log(`card refresh: cannot reach the review channel: ${e instanceof Error ? e.message : e}`); return; }
+	for (const id of ids) {
+		const t = store.getThreadFull(id);
+		if (!t?.review_message_id) continue;
+		try { const msg = await ch.messages.fetch(t.review_message_id); await msg.edit(card(t, ch.guildId)); }
+		catch (e) { console.log(`card refresh failed for ${id}: ${e instanceof Error ? e.message : e}`); }
+	}
+}
+
 // ---------- interactions ----------
 export async function handleInteraction(interaction: Interaction, store: Store): Promise<void> {
 	if (!('customId' in interaction) || !(interaction as any).customId?.startsWith('eval:')) return;
@@ -219,19 +273,42 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 		let draft = store.getLatestQaDraft(threadId);
 		if (!draft || draft.ingested_at) draft = { id: store.insertQaDraft(threadId, q, a) };
 		store.approveQa(draft.id, by, q, a);
+		// Teaching an answer IS a review action — without this the thread kept reviewed_by NULL, so
+		// the card you had just acted on was the one that looked untouched. Outcome and cause are
+		// left alone on purpose: teaching the fix is not a verdict on the miss, and cause_source
+		// stays 'auto' so this does not count as confirming the grader in the agreement figure.
+		store.applyReview(threadId, {}, by);
 		const t = store.getThreadFull(threadId);
 		const expected = (t?.cause === 'policy_account' || t?.cause === 'policy_other') ? 'escalate' : 'answer';
 		store.createGoldenCase({ question: q, expected, golden_answer: expected === 'answer' ? a : null, source: 'review', thread_id: threadId });
 		await interaction.reply({ content: `Q/A approved (golden: ${expected}). Adding to Ralph's KB…`, ephemeral: true });
+		// Render the card TWICE. The ingest below takes ~2 minutes, and a card that sits unchanged
+		// that whole time reads as "my submit did nothing" — which is exactly how this was first
+		// reported. So: show the taught answer at once, then settle the KB line when it is known.
+		const renderCard = async (kbPending = false) => {
+			try { await interaction.message?.edit(card(store.getThreadFull(threadId), interaction.guildId ?? '', { kbPending })); }
+			catch (e) { console.log(`card refresh failed for ${threadId}: ${e instanceof Error ? e.message : e}`); }
+		};
+		await renderCard(true);
 		// Push the approved answer straight into Ralph's KB (ROCKETRIDE_DOCS) from Discord — no CLI step.
+		let ingested: IngestedPair[] = [];
 		try {
-			const n = await ingestApproved(store, { log: console.log });
+			ingested = await ingestApproved(store, { log: console.log });
+			// Runs are serialised, so THIS pair may have been written by a run another click started.
+			// Ask the store what actually happened rather than assuming our own run did it.
+			const mine = !!store.getLatestQaDraft(threadId)?.ingested_at;
+			const others = ingested.filter((pr) => pr.thread_id !== threadId).length;
 			await interaction.editReply(
-				`✅ Q/A approved (golden: ${expected}) and **added to Ralph's KB**${n > 1 ? ` (+${n - 1} other pending)` : ''}. He'll use it on the next matching question.`,
-			);
+				mine
+					? `✅ Q/A approved (golden: ${expected}) and **added to Ralph's KB**${others ? ` (+${others} other pending)` : ''}. He'll use it on the next matching question.`
+					: `✅ Q/A approved (golden: ${expected}). The KB write is still queued — the card updates when it lands.`,
+			).catch(() => {});
 		} catch (e) {
-			await interaction.editReply(`Q/A approved (golden: ${expected}), but the KB write failed: ${e instanceof Error ? e.message : e}. Retry with \`tsx eval/main.ts --ingest-approved\`.`);
+			await interaction.editReply(`Q/A approved (golden: ${expected}), but the KB write failed: ${e instanceof Error ? e.message : e}. Retry with \`npx tsx eval/main.ts --ingest-approved\`.`).catch(() => {});
 		}
+		// This card AND every card the run settled. Guarded editReply above so a failed ephemeral
+		// can never throw past this point and strand a card on the pending state.
+		await refreshCardsFor(interaction.client, store, [threadId, ...ingested.map((pr) => pr.thread_id)]);
 		return;
 	}
 
@@ -247,7 +324,14 @@ export async function handleInteraction(interaction: Interaction, store: Store):
 				store.applyReview(threadId, { cause: c }, by);
 				note = `Reason set to **${CAUSE_LABELS[c] ?? c}**.`;
 			} else if (action === 'confirm') {
-				store.applyReview(threadId, {}, by);
+				// Confirming a graded miss IS the reviewer agreeing with the grader's reason, so re-write
+				// the SAME cause with cause_source='review'. That is what puts the thread in the grader
+				// agreement denominator: it counted only threads whose reason had been touched, so the
+				// cheapest way to agree registered as nothing and agreement was computed on corrections
+				// alone. Successes carry no cause, so nothing to affirm there.
+				const before = store.getThreadFull(threadId);
+				const affirm = isFailure(before?.outcome as Outcome) && before?.cause ? { cause: before.cause as string } : {};
+				store.applyReview(threadId, affirm, by);
 				const cur = store.getThreadFull(threadId);
 				note = isFailure(cur?.outcome as Outcome)
 					? `👍 Confirmed as a miss${causeText(cur?.cause) ? ` (${causeText(cur?.cause)})` : ''} — counts against Ralph’s success rate.`

@@ -1,18 +1,19 @@
 // eval/main.ts — process entry + CLI for the Rocket Ralph eval system.
 // Phase 2 commands:
-//   tsx eval/main.ts --backfill [--since YYYY-MM-DD] [--dry]
-//   tsx eval/main.ts --report   [--window 28|all]
+//   npx tsx eval/main.ts --backfill [--since YYYY-MM-DD] [--dry]
+//   npx tsx eval/main.ts --report   [--window 28|all]
 // (Phase 3+ add scheduled grading / review / replay here.)
 
+import { readFileSync } from 'node:fs';
 import { Client, GatewayIntentBits, Events, type Interaction } from 'discord.js';
 import { DateTime } from 'luxon';
 import { config } from './config';
 import { Store } from './store';
 import { backfill } from './backfill';
 import { gradeOnce } from './grader';
-import { postWeeklySummary, enqueueReviewCards, refreshReviewCards, handleInteraction } from './review';
+import { postWeeklySummary, enqueueReviewCards, refreshReviewCards, handleInteraction, refreshCardsFor } from './review';
 import { replay } from './replay';
-import { ingestApproved } from './ingest';
+import { ingestApproved, verifyIngested } from './ingest';
 import { writeFileSync } from 'node:fs';
 import { wilson, roundInterval, isFailure, type Outcome } from './rules';
 
@@ -92,8 +93,10 @@ function runReport() {
 	console.log(`UPPER BOUND success (no escalation/team/dead-end/no-reply): ${upperOk}/${D} = ${pct(upperOk, D)}`);
 	console.log(`  95% Wilson interval: ${iv ? `[${(iv[0] * 100).toFixed(1)}%, ${(iv[1] * 100).toFixed(1)}%]` : 'n/a'}`);
 
-	// graded section (Phase 3), if any threads have been graded
-	const graded = inWindow.filter((t) => t.status === 'graded' && t.outcome && t.outcome !== 'excluded');
+	// graded section (Phase 3), if any threads have been graded. 'reviewed' counts too: applyReview()
+	// moves a thread out of 'graded' the moment anyone touches its card, so filtering on 'graded'
+	// alone silently dropped exactly the threads a human had confirmed. Matches buildWeeklySummary().
+	const graded = inWindow.filter((t) => (t.status === 'graded' || t.status === 'reviewed') && t.outcome && t.outcome !== 'excluded');
 	if (graded.length) {
 		const oc: Record<string, number> = {}, cc: Record<string, number> = {};
 		for (const t of graded) { oc[t.outcome] = (oc[t.outcome] ?? 0) + 1; if (t.cause) cc[t.cause] = (cc[t.cause] ?? 0) + 1; }
@@ -109,7 +112,7 @@ function runReport() {
 		console.log(`confirmed-success rate: ${confirmed}/${denom} = ${pct(confirmed, denom)}  (pending/unconfirmed: ${pending}, left out until reviewed)`);
 		console.log(`  95% Wilson: ${giv ? `[${(giv[0] * 100).toFixed(1)}%, ${(giv[1] * 100).toFixed(1)}%]` : 'n/a'}  ·  target ${(config.target * 100).toFixed(0)}% (aspirational ${(config.targetAspirational * 100).toFixed(0)}%)`);
 	} else {
-		console.log(`\n(No graded threads yet — run: tsx eval/main.ts --grade-once. Upper bound is the ceiling; true resolution will be lower.)`);
+		console.log(`\n(No graded threads yet — run: npx tsx eval/main.ts --grade-once. Upper bound is the ceiling; true resolution will be lower.)`);
 	}
 }
 
@@ -187,11 +190,29 @@ async function main() {
 	if (has('--review-once')) return void (await withClient((c) => enqueueReviewCards(c, new Store(config.dbPath), log)));
 	if (has('--refresh-cards')) return void (await withClient((c) => refreshReviewCards(c, new Store(config.dbPath), log, { limit: val('--limit') ? Number(val('--limit')) : undefined })));
 	if (has('--replay')) { const s = new Store(config.dbPath); await replay(s, { limit: val('--limit') ? Number(val('--limit')) : undefined, log }); s.close(); return; }
-	if (has('--ingest-approved')) { const s = new Store(config.dbPath); await ingestApproved(s, { log }); s.close(); return; }
+	if (has('--verify-kb')) { const s = new Store(config.dbPath); await verifyIngested(s, { log }); s.close(); return; }
+	if (has('--ingest-approved')) {
+		// The ingest queue is per-PROCESS, so running this while the eval bot is live lets two
+		// processes fight over the same rag.pipe instance. That is exactly how a write was lost
+		// while the pair still got marked ingested. Refuse by default.
+		const botPid = (() => { try { return Number(readFileSync('logs/eval.pid', 'utf8').trim()); } catch { return 0; } })();
+		const botAlive = botPid > 0 && (() => { try { process.kill(botPid, 0); return true; } catch { return false; } })();
+		if (botAlive && !has('--force')) {
+			console.log(`refusing: the eval bot (pid ${botPid}) ingests from the same pipe.\n  stop it first:  ./stop-bots.sh eval   then   ./start-bots.sh eval\n  or pass --force if you are certain nothing else is ingesting.`);
+			return;
+		}
+		// Also refresh the cards this run settles. This is the command the "KB write failed" message
+		// tells you to run, so it has to finish the job — otherwise those cards keep showing the
+		// pending state with nothing left running to update them.
+		const s = new Store(config.dbPath);
+		const done = await ingestApproved(s, { log });
+		if (done.length) await withClient((c) => refreshCardsFor(c, s, done.map((pr) => pr.thread_id)));
+		s.close(); return;
+	}
 	if (has('--golden-from-thread')) return void goldenFromThread();
 	if (has('--golden-add')) return void goldenAdd();
 	if (has('--export-golden')) return void exportGolden();
 	if (has('--serve')) { await runServe(); return new Promise<void>(() => {}); } // stay online
-	console.log('usage: tsx eval/main.ts --backfill | --grade-once [--limit N] | --report [--window 28|all] |\n  --summary-once | --review-once | --refresh-cards [--limit N] | --replay [--limit N] | --ingest-approved |\n  --golden-from-thread <id> --expect escalate|answer | --golden-add --question .. --expect .. [--answer ..] | --export-golden | --serve');
+	console.log('usage: npx tsx eval/main.ts --backfill | --grade-once [--limit N] | --report [--window 28|all] |\n  --summary-once | --review-once | --refresh-cards [--limit N] | --replay [--limit N] |\n  --ingest-approved [--force] | --verify-kb |\n  --golden-from-thread <id> --expect escalate|answer | --golden-add --question .. --expect .. [--answer ..] | --export-golden | --serve');
 }
 main().then((v) => { if (v !== undefined || !has('--serve')) process.exit(0); }).catch((e) => { console.error('FATAL', e instanceof Error ? e.stack : e); process.exit(1); });

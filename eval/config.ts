@@ -39,6 +39,9 @@ export const config = {
 	replayProjectIds: list(process.env.EVAL_REPLAY_PROJECT_IDS).length === 2
 		? list(process.env.EVAL_REPLAY_PROJECT_IDS)
 		: ['d4e8f0a2-1b3c-4d5e-8f70-a1b2c3d4e5f6', 'a1b3c5d7-9e0f-4213-8546-7b8c9d0e1f20'],
+	// Ralph's KB lives in the LOCAL qdrant; ingest verifies its writes against it directly.
+	qdrantUrl: process.env.EVAL_QDRANT_URL || 'http://127.0.0.1:6333',
+	docsCollection: process.env.EVAL_DOCS_COLLECTION || 'ROCKETRIDE_DOCS',
 	rocketrideApiKey: process.env.ROCKETRIDE_APIKEY,
 	rocketrideUri: process.env.ROCKETRIDE_URI,
 };

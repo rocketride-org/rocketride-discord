@@ -39,6 +39,20 @@ CREATE TABLE IF NOT EXISTS golden_cases (
 const TRUNC = 4000;
 const clip = (s: string | null | undefined): string | null => (s == null ? null : String(s).slice(0, TRUNC));
 
+/**
+ * The shape every review card is built from: the thread, its cluster label, and the latest
+ * APPROVED Q/A pair for it. `card()` in review.ts reads these columns and never queries, so
+ * all three card queries have to select the same thing.
+ */
+const CARD_SELECT = `
+	SELECT t.*, c.label AS cluster_label,
+		q.approved_by AS qa_approved_by, q.approved_at AS qa_approved_at, q.ingested_at AS qa_ingested_at
+	FROM threads t
+	LEFT JOIN clusters c ON c.id = t.cluster_id
+	LEFT JOIN qa_pairs q ON q.id = (
+		SELECT id FROM qa_pairs WHERE thread_id = t.thread_id AND status = 'approved' ORDER BY id DESC LIMIT 1
+	)`;
+
 export interface ThreadRow {
 	thread_id: string; channel_id: string; opener_id: string; opener_is_team: number;
 	question: string; created_at: number; last_activity_at: number; excluded_reason?: string | null;
@@ -114,8 +128,7 @@ export class Store {
 
 	// ---- Phase 4 review ----
 	getReviewQueue(): any[] {
-		return this.db.prepare(`
-			SELECT t.*, c.label AS cluster_label FROM threads t LEFT JOIN clusters c ON c.id = t.cluster_id
+		return this.db.prepare(`${CARD_SELECT}
 			WHERE t.status = 'graded' AND t.review_message_id IS NULL
 				AND (t.outcome = 'resolved_unconfirmed' OR t.outcome IN ('deferred','deferred_unanswered','overridden','dead_end','no_reply','rejected','reasked'))
 			ORDER BY t.last_activity_at DESC
@@ -123,12 +136,12 @@ export class Store {
 	}
 	/** Threads that already have a card posted — used to re-render existing cards in place. */
 	getCardedThreads(limit?: number): any[] {
-		const sql = `SELECT t.*, c.label AS cluster_label FROM threads t LEFT JOIN clusters c ON c.id = t.cluster_id
+		const sql = `${CARD_SELECT}
 			WHERE t.review_message_id IS NOT NULL ORDER BY t.last_activity_at DESC${limit ? ' LIMIT ' + Number(limit) : ''}`;
 		return this.db.prepare(sql).all();
 	}
 	getThreadFull(threadId: string): any {
-		return this.db.prepare('SELECT t.*, c.label AS cluster_label FROM threads t LEFT JOIN clusters c ON c.id = t.cluster_id WHERE t.thread_id = ?').get(threadId);
+		return this.db.prepare(`${CARD_SELECT} WHERE t.thread_id = ?`).get(threadId);
 	}
 	setReviewMessageId(threadId: string, messageId: string): void {
 		this.db.prepare('UPDATE threads SET review_message_id = ? WHERE thread_id = ?').run(messageId, threadId);
@@ -148,6 +161,9 @@ export class Store {
 	}
 	getApprovedUningested(): any[] { return this.db.prepare("SELECT * FROM qa_pairs WHERE status='approved' AND ingested_at IS NULL").all(); }
 	markIngested(id: number): void { this.db.prepare('UPDATE qa_pairs SET ingested_at=? WHERE id=?').run(Date.now(), id); }
+	/** Undo a claim that a pair reached the KB, so a retry picks it up again (see --verify-kb). */
+	unmarkIngested(id: number): void { this.db.prepare('UPDATE qa_pairs SET ingested_at=NULL WHERE id=?').run(id); }
+	getIngested(): any[] { return this.db.prepare("SELECT * FROM qa_pairs WHERE status='approved' AND ingested_at IS NOT NULL").all(); }
 	createGoldenCase(c: { question: string; expected: string; golden_answer?: string | null; source: string; thread_id?: string | null }): void {
 		this.db.prepare('INSERT INTO golden_cases (question, expected, golden_answer, source, thread_id, active, created_at) VALUES (?,?,?,?,?,1,?)')
 			.run(clip(c.question) ?? '', c.expected, clip(c.golden_answer ?? null), c.source, c.thread_id ?? null, Date.now());
