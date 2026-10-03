@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rocket Ralph Eval System — Phase Summary</title>
+<style>
+  body{max-width:860px;margin:32px auto;padding:0 20px;color:#1a1a2e;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  h1{font-size:26px;margin:0 0 4px}
+  .sub{color:#5b5b70;margin:0 0 24px}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:#5865F2;margin:30px 0 8px}
+  table{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:14.5px}
+  th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid #e6e6ef}
+  th{background:#f6f7fb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#5b5b70}
+  td.p{font-weight:600;white-space:nowrap}
+  .s{white-space:nowrap;font-weight:600}
+  .ok{color:#1f9d55}.part{color:#c77700}.no{color:#b0ב0c0;color:#9a9aa8}
+  .legend{font-size:13px;color:#5b5b70;margin-top:6px}
+  ol{padding-left:22px}li{margin:.35em 0}
+  .box{background:#f6f7fb;border:1px solid #e6e6ef;border-radius:10px;padding:14px 18px;margin:14px 0}
+  .tag{display:inline-block;background:#eef0fb;color:#5865F2;border-radius:20px;padding:1px 9px;font-size:12px;font-weight:600}
+  footer{margin-top:28px;color:#9a9aa8;font-size:12.5px;border-top:1px solid #e6e6ef;padding-top:12px}
+  @media print{body{margin:0}}
+</style>
+</head>
+<body>
+  <h1>Rocket Ralph Eval System</h1>
+  <p class="sub">Phase summary &amp; pending decisions · prepared 2026-09-22</p>
+
+  <div class="box">
+    <strong>What it is:</strong> a measurement + feedback loop for the Discord support bot. It records what happens to every support thread, explains <em>why</em> failures happen, surfaces <strong>documentation gaps</strong>, and turns good human answers into knowledge + regression tests. Goal: move Ralph from ~30% to the <strong>60%</strong> target (90% aspirational).
+  </div>
+
+  <h2>Phases</h2>
+  <table>
+    <tr><th>Phase</th><th>What it does</th><th>Status</th><th>Pending</th></tr>
+    <tr><td class="p">0 · Verify</td><td>Prove the risky assumptions before building.</td><td class="s ok">✅ done</td><td>Roundtable thread IDs; full team list <span class="tag">Joshua</span></td></tr>
+    <tr><td class="p">1 · Live capture</td><td>Record an outcome for every thread as it happens.</td><td class="s part">⏳ half</td><td>Data layer built; <strong>wiring into the live bot</strong> needs deploy; the <strong>escalation decision</strong>; feedback ✅/❌ on? <span class="tag">Joshua</span></td></tr>
+    <tr><td class="p">2 · Baseline</td><td>Measure today from history.</td><td class="s ok">✅ done + run</td><td>None — result ~27.5% (28-day upper bound)</td></tr>
+    <tr><td class="p">3 · Grader</td><td>Nightly AI labels cause, records doc gaps, drafts answers.</td><td class="s ok">✅ built + run</td><td>Escalation decision finalizes scoring <span class="tag">Joshua</span></td></tr>
+    <tr><td class="p">4 · Review + summary</td><td>Team confirms/corrects via Discord buttons; weekly scorecard.</td><td class="s ok">✅ built + verified</td><td>Just switch it "on" (no decision)</td></tr>
+    <tr><td class="p">5 · Replay</td><td>Re-run known questions weekly to catch regressions.</td><td class="s part">⏳ built</td><td>Needs Roundtable seeds + approvals; gated first run <span class="tag">Joshua</span></td></tr>
+    <tr><td class="p">6 · Feedback</td><td>Approved answers → knowledge base (6a) &amp; public FAQ (6b).</td><td class="s part">⏳ 6a built</td><td>6a needs approvals; 6b needs sign-off <span class="tag">Joshua</span></td></tr>
+    <tr><td class="p">7 · Esc. token</td><td>Tag escalations with a reason — only if needed.</td><td class="s no">— conditional</td><td>Not needed yet</td></tr>
+  </table>
+  <p class="legend">✅ built (many verified/run) · ⏳ partial or gated · — not needed. Everything decision-free is built; nothing below touches production without a gate.</p>
+
+  <h2>Decisions still pending — all Joshua</h2>
+  <ol>
+    <li><strong>Escalation = success or failure?</strong> Which escalations are correct (e.g., interview-token questions routed to Joe/Ben) vs. count as failures. <em>Most important — finalizes Phase 3 scoring.</em></li>
+    <li><strong>Roundtable thread IDs</strong> — the July-16 "trick Ralph" threads. <em>Needed for Phase 5 to be useful.</em></li>
+    <li><strong>Full team list / role coverage</strong> — Joshua's ID is in; confirm everyone else carries the team role.</li>
+    <li><strong>Deploy the live capture</strong> into the real bot (Phase 1).</li>
+    <li><strong>Turn on ✅/❌ feedback reactions?</strong> (Phase 1).</li>
+    <li><strong>Sign off on the public FAQ writeback</strong> (Phase 6b — it's public-facing).</li>
+  </ol>
+
+  <div class="box">
+    <strong>Already decided:</strong> target = <strong>60%</strong> now (90% later) · escalations count as failures for now · <strong>doc gaps are recorded</strong> (as <code>content_gap</code>) and shown in the report + weekly summary.
+  </div>
+
+  <footer>Rocket Ralph Eval System — phase summary. Built across Phases 0–6 (decision-free parts); Phases 1-live, 5, 6 are gated on the items above. Generated 2026-09-22.</footer>
+</body>
+</html>

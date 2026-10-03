@@ -291,7 +291,7 @@ function loadSocialState(): SocialState {
 	catch (e: any) { if (e?.code === 'ENOENT') return { watermark: {}, seen: new Set() }; throw e; }
 }
 function saveSocialState(s: SocialState): void {
-	try { writeFileSync(SOCIAL.statePath, JSON.stringify({ watermark: s.watermark, seen: [...s.seen].slice(-500) }, null, 2)); }
+	try { writeFileSync(SOCIAL.statePath, JSON.stringify({ watermark: s.watermark, seen: [...s.seen].slice(-1000) }, null, 2)); }
 	catch (e) { log('[social] !! could not persist state:', e instanceof Error ? e.message : e); }
 }
 
@@ -305,6 +305,12 @@ const SOCIAL_ICONS: Record<string, string> = {
 };
 const SOCIAL_LABELS: Record<string, string> = { youtube: 'New RocketRide video on YouTube', x: '𝕏  New RocketRide post on X', newsletter: '✉  New RocketRide newsletter', instagram: 'New RocketRide post on Instagram', linkedin: 'New RocketRide post on LinkedIn' };
 const socialKey = (it: FeedItem) => `${it.platform}:${it.id}`;
+// Content key: dedup by normalized body text so the SAME post republished under a new tweet
+// id (or the account posting identical text twice) isn't announced twice — the id key alone
+// misses that (different id, same content). URLs stripped so a trailing link change doesn't
+// dodge the check; platform-prefixed so intentional cross-posting still goes through.
+const contentKey = (it: FeedItem) =>
+	`${it.platform}#txt:${(it.text ?? it.title ?? '').toLowerCase().replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim().slice(0, 300)}`;
 
 // Download the preview image so we can upload it AS a Discord attachment instead of
 // handing Discord an external URL to proxy. Fixes two failure modes:
@@ -374,12 +380,12 @@ async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean; only?:
 	const byPlatform = new Map<string, FeedItem[]>();
 	for (const it of items) { const a = byPlatform.get(it.platform) ?? []; a.push(it); byPlatform.set(it.platform, a); }
 
-	const toPost: FeedItem[] = []; const seeded: string[] = [];
+	const toPost: FeedItem[] = []; const seeded: string[] = []; const queuedContent = new Set<string>();
 	for (const [platform, list] of byPlatform) {
 		if (state.watermark[platform] === undefined && !opts.backfill) {
 			const newest = list.reduce((a, b) => (a.published > b.published ? a : b));
 			state.watermark[platform] = newest.published.toISOString();
-			list.forEach((it) => state.seen.add(socialKey(it)));
+			list.forEach((it) => { state.seen.add(socialKey(it)); state.seen.add(contentKey(it)); });
 			seeded.push(`${platform} (${list.length})`);
 			continue;
 		}
@@ -388,7 +394,19 @@ async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean; only?:
 		// excluded by the timestamp gate alone — no reliance on the (bounded, evictable)
 		// seen-set to avoid reposting the boundary item. A brand-new item sharing the
 		// exact watermark timestamp isn't realistic for these feeds.
-		for (const it of list) if (it.published.getTime() > cutoff && !state.seen.has(socialKey(it))) toPost.push(it);
+		for (const it of list) {
+			if (it.published.getTime() <= cutoff || state.seen.has(socialKey(it))) continue;
+			const ck = contentKey(it);
+			// Same body already posted, or already queued this run under another id → skip it,
+			// but remember its id so it isn't re-evaluated every run.
+			if (state.seen.has(ck) || queuedContent.has(ck)) {
+				state.seen.add(socialKey(it));
+				log(`[social] skip duplicate content: [${it.platform}] ${it.title}`);
+				continue;
+			}
+			queuedContent.add(ck);
+			toPost.push(it);
+		}
 	}
 	toPost.sort((a, b) => a.published.getTime() - b.published.getTime()); // oldest first → chronological
 	if (seeded.length) log(`[social] seeded baseline, posted nothing: ${seeded.join(', ')}`);
@@ -406,7 +424,7 @@ async function announceOnce(opts: { dryRun?: boolean; backfill?: boolean; only?:
 		try {
 			const { embed, files } = await buildSocialPost(it);
 			await rest.post(Routes.channelMessages(SOCIAL.channelId), { body: { embeds: [embed] }, files });
-			state.seen.add(socialKey(it));
+			state.seen.add(socialKey(it)); state.seen.add(contentKey(it));
 			const wm = state.watermark[it.platform];
 			if (!wm || it.published.getTime() > new Date(wm).getTime()) state.watermark[it.platform] = it.published.toISOString();
 			posted++;

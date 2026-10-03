@@ -1,0 +1,12 @@
+{
+  "records": [
+    {
+      "discord_id": "000000000000000000",
+      "github_id": 583231,
+      "github_login": "octocat",
+      "verified_at": 1759363200000,
+      "merged_prs": 3,
+      "method": "github-device-flow"
+    }
+  ]
+}
