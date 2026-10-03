@@ -6,6 +6,7 @@ import { RocketRideClient } from 'rocketride';
 import { initSlackRouter, notifyEscalation, escalateManually } from './slack-router';
 import { recordQuestion, recordThreadMessage, recordRalphReply, recordNoReply, recordReaction, isTeamMember } from './eval/capture';
 import { sanitizeReply } from './reply-sanitize';
+import { initGithubVerify } from './github-verify-discord';
 
 // RocketRide support bot ("Rocket Ralph") — MAIN support channel, webhook + multi-modal.
 // - The user's typed text and each image/audio/video attachment are sent to the
@@ -548,6 +549,11 @@ async function main() {
 			await interaction.editReply(`⚠️ Couldn't escalate: ${result.reason}`).catch(() => {});
 		}
 	});
+
+	// GitHub contributor verification (see github-verify-discord.ts): the panel's buttons are
+	// served by their OWN InteractionCreate listener, so nothing above is affected. Self-disables
+	// with a log line if its config is missing.
+	initGithubVerify(discord, log);
 
 	// eval: ✅/❌ on one of Ralph's replies = the asker grading the answer. Records the toggle;
 	// guarded so a bad reaction event never affects the bot.
